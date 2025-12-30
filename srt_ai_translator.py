@@ -101,6 +101,9 @@ def main():
 
     # Process subtitles in windows
     translated_subs = pysrt.SubRipFile()
+    tmp_output_path = Path(args.output_path).with_suffix(
+        Path(args.output_path).suffix + ".tmp"
+    )
 
     # Create windows of subtitles
     windows = []
@@ -121,12 +124,21 @@ def main():
         )
         translated_subs.extend(translated_window)
 
-    # Save translated SRT
+        # Write current progress to temporary file after each window
+        # This allows continuous incremental updates and recovery on failure
+        try:
+            translated_subs.save(path=str(tmp_output_path), encoding="utf-8")
+        except Exception as e:
+            logger.error(f"Error saving progress to temporary file: {e}")
+            sys.exit(1)
+
+    # Atomically rename temp file to final output
+    # This ensures the final output is written atomically
     try:
-        translated_subs.save(path=args.output_path, encoding="utf-8")
+        tmp_output_path.rename(args.output_path)
         logger.info(f"Translation saved to: {args.output_path}")
     except Exception as e:
-        logger.error(f"Error saving translated SRT: {e}")
+        logger.error(f"Error finalizing output file: {e}")
         sys.exit(1)
 
 
