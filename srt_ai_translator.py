@@ -113,7 +113,7 @@ def main():
 
 def translate_window(client, window, model, context, target_language):
     """Translate a window of subtitle entries using OpenAI API
-    
+
     Parameters
     ----------
     client : OpenAI
