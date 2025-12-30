@@ -60,7 +60,7 @@ def main():
     )
     parser.add_argument(
         "--target-language",
-        default="English",
+        required=True,
         help="Target language for translation (default: English)",
     )
 
