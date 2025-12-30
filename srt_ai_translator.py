@@ -61,6 +61,11 @@ def main():
 
     args = parser.parse_args()
 
+    # Validate base URL starts with http:// or https://
+    if not (args.base_url.startswith("http://") or args.base_url.startswith("https://")):
+        logger.error(f"Base URL must start with http:// or https://, got: {args.base_url}")
+        sys.exit(1)
+
     # Validate input file exists
     if not Path(args.srt_file).exists():
         logger.error(f"SRT file '{args.srt_file}' not found")
