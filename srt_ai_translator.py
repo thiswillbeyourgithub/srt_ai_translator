@@ -33,25 +33,15 @@ def main():
     )
 
     parser.add_argument("--srt-file", required=True, help="Path to the input SRT file")
-    parser.add_argument("--base-url", required=True, help="Base URL for the OpenAI API")
-    parser.add_argument(
-        "--model", required=True, help="Model name to use for translation"
-    )
     parser.add_argument(
         "--output-path",
         required=True,
         help="Path for the output translated SRT file",
     )
     parser.add_argument(
-        "--api-key",
-        help="API key for OpenAI (if not provided, uses OPENAI_API_KEY environment variable)",
-    )
-
-    parser.add_argument(
-        "--window-size",
-        type=int,
-        default=4,
-        help="Number of subtitle entries to process in each batch (default: 4)",
+        "--target-language",
+        required=True,
+        help="Target language for translation (default: English)",
     )
     parser.add_argument(
         "--srt-context",
@@ -59,9 +49,18 @@ def main():
         help="Context information for translation (e.g., video type, dialect)",
     )
     parser.add_argument(
-        "--target-language",
-        required=True,
-        help="Target language for translation (default: English)",
+        "--window-size",
+        type=int,
+        default=4,
+        help="Number of subtitle entries to process in each batch (default: 4)",
+    )
+    parser.add_argument(
+        "--model", required=True, help="Model name to use for translation"
+    )
+    parser.add_argument("--base-url", required=True, help="Base URL for the OpenAI API")
+    parser.add_argument(
+        "--api-key",
+        help="API key for OpenAI (if not provided, uses OPENAI_API_KEY environment variable)",
     )
 
     args = parser.parse_args()
