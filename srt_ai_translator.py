@@ -6,6 +6,11 @@ SRT AI Translator - Translate SRT subtitle files using OpenAI API
 import argparse
 import sys
 from pathlib import Path
+import pysrt
+from openai import OpenAI
+from tqdm import tqdm
+import xml.etree.ElementTree as ET
+import re
 
 
 def main():
@@ -34,6 +39,14 @@ def main():
     print(f"Output: {args.output_path}")
     if args.srt_context:
         print(f"Context: {args.srt_context}")
+    
+    # Parse SRT file
+    try:
+        subs = pysrt.open(args.srt_file)
+        print(f"Loaded {len(subs)} subtitle entries")
+    except Exception as e:
+        print(f"Error parsing SRT file: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

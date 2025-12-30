@@ -14,10 +14,10 @@
 - Show progress with tqdm progress bar
 
 ## COMPLETED
-(none yet)
+- SETUP: Create initial ROADMAP.md structure. REASON: coordinate development across iterations. STATUS: done
 
 ## IN_PROGRESS
-- SETUP: Create initial ROADMAP.md structure. REASON: coordinate development across iterations. STATUS: in progress
+- IMPLEMENT: SRT file parsing using pysrt library. REASON: need to read subtitle data. STATUS: in progress
 
 ## TODO
 - P0: CREATE: Basic script structure with argparse. REASON: foundation for all functionality. COMPLEXITY: low
