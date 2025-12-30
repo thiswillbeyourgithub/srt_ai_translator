@@ -22,7 +22,7 @@ import xml.etree.ElementTree as ET
 import re
 from loguru import logger
 
-VERSION: str = "0.1.0"
+VERSION: str = "0.1.1"
 
 def main():
     # Configure logger to write to ./logs.txt with rotation and retention
