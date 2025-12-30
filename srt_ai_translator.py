@@ -48,6 +48,11 @@ def main():
         default="",
         help="Context information for translation (e.g., video type, dialect)",
     )
+    parser.add_argument(
+        "--target-language",
+        default="English",
+        help="Target language for translation (default: English)",
+    )
 
     args = parser.parse_args()
 
@@ -60,6 +65,7 @@ def main():
     print(f"Window size: {args.window_size}")
     print(f"Model: {args.model}")
     print(f"Output: {args.output_path}")
+    print(f"Target language: {args.target_language}")
     if args.srt_context:
         print(f"Context: {args.srt_context}")
 
@@ -88,7 +94,11 @@ def main():
     # Process each window with progress bar
     for window_idx, window in enumerate(tqdm(iterable=windows, desc="Translating")):
         translated_window = translate_window(
-            client=client, window=window, model=args.model, context=args.srt_context
+            client=client,
+            window=window,
+            model=args.model,
+            context=args.srt_context,
+            target_language=args.target_language,
         )
         translated_subs.extend(translated_window)
 
@@ -101,8 +111,22 @@ def main():
         sys.exit(1)
 
 
-def translate_window(client, window, model, context):
-    """Translate a window of subtitle entries using OpenAI API"""
+def translate_window(client, window, model, context, target_language):
+    """Translate a window of subtitle entries using OpenAI API
+    
+    Parameters
+    ----------
+    client : OpenAI
+        OpenAI client instance
+    window : list
+        List of subtitle entries to translate
+    model : str
+        Model name to use for translation
+    context : str
+        Context information for translation
+    target_language : str
+        Target language for translation
+    """
     # Build XML prompt
     xml_texts = []
     for i, sub in enumerate(window, start=1):
@@ -114,7 +138,7 @@ def translate_window(client, window, model, context):
         else "<srt-context></srt-context>"
     )
 
-    prompt = f"""Please translate the following subtitle texts to English. Think about the context and provide accurate translations.
+    prompt = f"""Please translate the following subtitle texts to {target_language}. Think about the context and provide accurate translations.
 
 {context_xml}
 
