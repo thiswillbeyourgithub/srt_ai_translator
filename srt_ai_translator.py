@@ -6,6 +6,7 @@
 #   "openai",
 #   "tqdm",
 #   "loguru",
+#   "ffmpeg-python",
 # ]
 # ///
 """
@@ -21,6 +22,9 @@ from tqdm import tqdm
 import xml.etree.ElementTree as ET
 import re
 from loguru import logger
+import ffmpeg
+import json
+import tempfile
 
 VERSION: str = "0.1.1"
 
@@ -32,7 +36,11 @@ def main():
         description="Translate SRT subtitle files using OpenAI API"
     )
 
-    parser.add_argument("--srt-file", required=True, help="Path to the input SRT file")
+    parser.add_argument("--srt-file", help="Path to the input SRT file")
+    parser.add_argument(
+        "--video",
+        help="Path to the input video file (will extract subtitles)",
+    )
     parser.add_argument(
         "--output-path",
         required=True,
@@ -65,6 +73,14 @@ def main():
 
     args = parser.parse_args()
 
+    # Validate that either --srt-file or --video is provided (but not both)
+    if not args.srt_file and not args.video:
+        logger.error("Either --srt-file or --video must be provided")
+        sys.exit(1)
+    if args.srt_file and args.video:
+        logger.error("Cannot specify both --srt-file and --video")
+        sys.exit(1)
+
     # Validate base URL starts with http:// or https://
     if not (
         args.base_url.startswith("http://") or args.base_url.startswith("https://")
@@ -73,6 +89,75 @@ def main():
             f"Base URL must start with http:// or https://, got: {args.base_url}"
         )
         sys.exit(1)
+
+    # Handle video input - extract subtitles to temporary SRT file
+    temp_srt_file = None
+    if args.video:
+        if not Path(args.video).exists():
+            logger.error(f"Video file '{args.video}' not found")
+            sys.exit(1)
+
+        logger.info(f"Extracting subtitles from video: {args.video}")
+        subtitle_streams = list_subtitle_streams(video_path=args.video)
+
+        if not subtitle_streams:
+            logger.error("No subtitle streams found in video")
+            sys.exit(1)
+
+        # If multiple streams, prompt user for choice
+        selected_stream = None
+        if len(subtitle_streams) == 1:
+            selected_stream = subtitle_streams[0]
+            logger.info(
+                f"Found 1 subtitle stream: {selected_stream['language']} ({selected_stream['codec_name']})"
+            )
+        else:
+            logger.info(f"Found {len(subtitle_streams)} subtitle streams:")
+            for idx, stream in enumerate(subtitle_streams):
+                lang = stream.get("language", "unknown")
+                codec = stream.get("codec_name", "unknown")
+                title = stream.get("title", "")
+                title_str = f" - {title}" if title else ""
+                logger.info(f"  {idx + 1}. {lang} ({codec}){title_str}")
+
+            while True:
+                try:
+                    choice = input(
+                        "Enter the number of the subtitle stream to translate: "
+                    )
+                    choice_idx = int(choice) - 1
+                    if 0 <= choice_idx < len(subtitle_streams):
+                        selected_stream = subtitle_streams[choice_idx]
+                        break
+                    else:
+                        print(
+                            f"Invalid choice. Please enter a number between 1 and {len(subtitle_streams)}"
+                        )
+                except (ValueError, KeyboardInterrupt):
+                    logger.error("Invalid input or interrupted")
+                    sys.exit(1)
+
+        # Extract subtitle to temporary SRT file
+        # Using NamedTemporaryFile with delete=False to keep the file for processing
+        # We'll clean it up at the end
+        temp_srt_file = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".srt", delete=False
+        )
+        temp_srt_path = temp_srt_file.name
+        temp_srt_file.close()
+
+        try:
+            extract_subtitle_stream(
+                video_path=args.video,
+                stream_index=selected_stream["index"],
+                output_path=temp_srt_path,
+            )
+            logger.info(f"Extracted subtitle to temporary file: {temp_srt_path}")
+            args.srt_file = temp_srt_path
+        except Exception as e:
+            logger.error(f"Failed to extract subtitle: {e}")
+            Path(temp_srt_path).unlink(missing_ok=True)
+            sys.exit(1)
 
     # Validate input file exists
     if not Path(args.srt_file).exists():
@@ -147,6 +232,11 @@ def main():
     except Exception as e:
         logger.error(f"Error finalizing output file: {e}")
         sys.exit(1)
+    finally:
+        # Clean up temporary SRT file if it was created from video extraction
+        if temp_srt_file:
+            Path(temp_srt_path).unlink(missing_ok=True)
+            logger.info("Cleaned up temporary subtitle file")
 
 
 def translate_window(client, window, model, context, target_language):
@@ -244,6 +334,64 @@ Please think about the translation, then provide your answer in this exact forma
                 )
                 # Return original texts as fallback
                 return window
+
+
+def list_subtitle_streams(video_path: str) -> list:
+    """List all subtitle streams in the video file
+
+    Parameters
+    ----------
+    video_path : str
+        Path to the video file
+
+    Returns
+    -------
+    list
+        List of subtitle stream information dictionaries
+    """
+    try:
+        probe = ffmpeg.probe(filename=video_path)
+        subtitle_streams = [
+            stream
+            for stream in probe["streams"]
+            if stream["codec_type"] == "subtitle"
+        ]
+        return subtitle_streams
+    except ffmpeg.Error as e:
+        logger.error(f"ffmpeg error while probing video: {e.stderr.decode()}")
+        raise
+    except Exception as e:
+        logger.error(f"Error probing video file: {e}")
+        raise
+
+
+def extract_subtitle_stream(video_path: str, stream_index: int, output_path: str):
+    """Extract a subtitle stream from video to SRT file
+
+    Parameters
+    ----------
+    video_path : str
+        Path to the video file
+    stream_index : int
+        Index of the subtitle stream to extract
+    output_path : str
+        Path for the output SRT file
+    """
+    try:
+        # Use ffmpeg to extract the subtitle stream
+        # Map the specific subtitle stream and convert to SRT format
+        (
+            ffmpeg.input(filename=video_path)
+            .output(filename=output_path, map=f"0:{stream_index}", format="srt")
+            .overwrite_output()
+            .run(capture_stdout=True, capture_stderr=True)
+        )
+    except ffmpeg.Error as e:
+        logger.error(f"ffmpeg error while extracting subtitle: {e.stderr.decode()}")
+        raise
+    except Exception as e:
+        logger.error(f"Error extracting subtitle stream: {e}")
+        raise
 
 
 def parse_xml_response(response_text, expected_count):
