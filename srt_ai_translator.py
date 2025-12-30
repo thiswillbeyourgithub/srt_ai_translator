@@ -165,10 +165,13 @@ def translate_window(client, window, model, context, target_language):
     target_language : str
         Target language for translation
     """
-    # Build XML prompt
+    # Build XML prompt with timing information
+    # Including timing helps the LLM understand temporal context (e.g., rapid dialogue vs. long pauses)
     xml_texts = []
     for i, sub in enumerate(window, start=1):
-        xml_texts.append(f'<text id="{i}">{sub.text}</text>')
+        xml_texts.append(
+            f'<text id="{i}" start="{sub.start}" end="{sub.end}">{sub.text}</text>'
+        )
 
     context_xml = (
         f"<srt-context>{context}</srt-context>"
@@ -177,6 +180,8 @@ def translate_window(client, window, model, context, target_language):
     )
 
     prompt = f"""Please translate the following subtitle texts to {target_language}. Think about the context and provide accurate translations.
+
+The timing information (start/end) is provided to help you understand the temporal context - whether this is rapid dialogue or if significant time has passed between subtitles.
 
 {context_xml}
 
