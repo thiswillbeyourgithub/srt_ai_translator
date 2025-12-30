@@ -26,10 +26,20 @@ def main():
         description="Translate SRT subtitle files using OpenAI API"
     )
 
-    parser.add_argument("srt_file", help="Path to the input SRT file")
-    parser.add_argument("base_url", help="Base URL for the OpenAI API")
-    parser.add_argument("model", help="Model name to use for translation")
-    parser.add_argument("output_path", help="Path for the output translated SRT file")
+    parser.add_argument(
+        "--srt-file", required=True, help="Path to the input SRT file"
+    )
+    parser.add_argument(
+        "--base-url", required=True, help="Base URL for the OpenAI API"
+    )
+    parser.add_argument(
+        "--model", required=True, help="Model name to use for translation"
+    )
+    parser.add_argument(
+        "--output-path",
+        required=True,
+        help="Path for the output translated SRT file",
+    )
 
     parser.add_argument(
         "--window-size",
