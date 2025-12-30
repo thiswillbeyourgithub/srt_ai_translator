@@ -166,7 +166,9 @@ def parse_xml_response(response_text, expected_count):
     """Parse XML response and extract translated texts"""
     try:
         # Extract answer block
-        answer_match = re.search(pattern=r"<answer>(.*?)</answer>", string=response_text, flags=re.DOTALL)
+        answer_match = re.search(
+            pattern=r"<answer>(.*?)</answer>", string=response_text, flags=re.DOTALL
+        )
         if not answer_match:
             raise ValueError("No <answer> block found in response")
 
@@ -174,7 +176,9 @@ def parse_xml_response(response_text, expected_count):
 
         # Parse individual text elements
         text_pattern = r'<text id="(\d+)">(.*?)</text>'
-        matches = re.findall(pattern=text_pattern, string=answer_content, flags=re.DOTALL)
+        matches = re.findall(
+            pattern=text_pattern, string=answer_content, flags=re.DOTALL
+        )
 
         if len(matches) != expected_count:
             raise ValueError(
