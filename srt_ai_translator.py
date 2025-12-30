@@ -41,6 +41,10 @@ def main():
         required=True,
         help="Path for the output translated SRT file",
     )
+    parser.add_argument(
+        "--api-key",
+        help="API key for OpenAI (if not provided, uses OPENAI_API_KEY environment variable)",
+    )
 
     parser.add_argument(
         "--window-size",
@@ -92,7 +96,8 @@ def main():
         sys.exit(1)
 
     # Initialize OpenAI client
-    client = OpenAI(base_url=args.base_url)
+    # If api_key is not provided, OpenAI client will use OPENAI_API_KEY environment variable
+    client = OpenAI(base_url=args.base_url, api_key=args.api_key)
 
     # Process subtitles in windows
     translated_subs = pysrt.SubRipFile()
