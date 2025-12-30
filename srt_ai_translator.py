@@ -28,6 +28,7 @@ import tempfile
 
 VERSION: str = "0.1.1"
 
+
 def main():
     # Configure logger to write to ./logs.txt with rotation and retention
     logger.add("./logs.txt", rotation="10 MB", retention="7 days", level="INFO")
@@ -352,9 +353,7 @@ def list_subtitle_streams(video_path: str) -> list:
     try:
         probe = ffmpeg.probe(filename=video_path)
         subtitle_streams = [
-            stream
-            for stream in probe["streams"]
-            if stream["codec_type"] == "subtitle"
+            stream for stream in probe["streams"] if stream["codec_type"] == "subtitle"
         ]
         return subtitle_streams
     except ffmpeg.Error as e:
