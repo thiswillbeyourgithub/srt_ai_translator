@@ -5,6 +5,7 @@
 #   "pysrt",
 #   "openai",
 #   "tqdm",
+#   "loguru",
 # ]
 # ///
 """
@@ -19,9 +20,13 @@ from openai import OpenAI
 from tqdm import tqdm
 import xml.etree.ElementTree as ET
 import re
+from loguru import logger
 
 
 def main():
+    # Configure logger to write to ./logs.txt with rotation and retention
+    logger.add("./logs.txt", rotation="10 MB", retention="7 days", level="INFO")
+    
     parser = argparse.ArgumentParser(
         description="Translate SRT subtitle files using OpenAI API"
     )
@@ -58,23 +63,23 @@ def main():
 
     # Validate input file exists
     if not Path(args.srt_file).exists():
-        print(f"Error: SRT file '{args.srt_file}' not found", file=sys.stderr)
+        logger.error(f"SRT file '{args.srt_file}' not found")
         sys.exit(1)
 
-    print(f"Processing: {args.srt_file}")
-    print(f"Window size: {args.window_size}")
-    print(f"Model: {args.model}")
-    print(f"Output: {args.output_path}")
-    print(f"Target language: {args.target_language}")
+    logger.info(f"Processing: {args.srt_file}")
+    logger.info(f"Window size: {args.window_size}")
+    logger.info(f"Model: {args.model}")
+    logger.info(f"Output: {args.output_path}")
+    logger.info(f"Target language: {args.target_language}")
     if args.srt_context:
-        print(f"Context: {args.srt_context}")
+        logger.info(f"Context: {args.srt_context}")
 
     # Parse SRT file
     try:
         subs = pysrt.open(path=args.srt_file)
-        print(f"Loaded {len(subs)} subtitle entries")
+        logger.info(f"Loaded {len(subs)} subtitle entries")
     except Exception as e:
-        print(f"Error parsing SRT file: {e}", file=sys.stderr)
+        logger.error(f"Error parsing SRT file: {e}")
         sys.exit(1)
 
     # Initialize OpenAI client
@@ -89,7 +94,7 @@ def main():
         window = subs[i : i + args.window_size]
         windows.append(window)
 
-    print(f"Processing {len(windows)} windows...")
+    logger.info(f"Processing {len(windows)} windows...")
 
     # Process each window with progress bar
     for window_idx, window in enumerate(tqdm(iterable=windows, desc="Translating")):
@@ -105,9 +110,9 @@ def main():
     # Save translated SRT
     try:
         translated_subs.save(path=args.output_path, encoding="utf-8")
-        print(f"Translation saved to: {args.output_path}")
+        logger.info(f"Translation saved to: {args.output_path}")
     except Exception as e:
-        print(f"Error saving translated SRT: {e}", file=sys.stderr)
+        logger.error(f"Error saving translated SRT: {e}")
         sys.exit(1)
 
 
@@ -184,9 +189,8 @@ Please think about the translation, then provide your answer in this exact forma
                 prompt += f"\n\nPrevious parsing failed with error: {str(e)}. Please correct the format and try again."
                 continue
             else:
-                print(
-                    f"Failed to translate window after {max_retries} attempts: {e}",
-                    file=sys.stderr,
+                logger.error(
+                    f"Failed to translate window after {max_retries} attempts: {e}"
                 )
                 # Return original texts as fallback
                 return window
