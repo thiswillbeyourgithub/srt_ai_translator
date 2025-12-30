@@ -59,7 +59,7 @@ def main():
 
     # Parse SRT file
     try:
-        subs = pysrt.open(args.srt_file)
+        subs = pysrt.open(path=args.srt_file)
         print(f"Loaded {len(subs)} subtitle entries")
     except Exception as e:
         print(f"Error parsing SRT file: {e}", file=sys.stderr)
@@ -80,15 +80,15 @@ def main():
     print(f"Processing {len(windows)} windows...")
 
     # Process each window with progress bar
-    for window_idx, window in enumerate(tqdm(windows, desc="Translating")):
+    for window_idx, window in enumerate(tqdm(iterable=windows, desc="Translating")):
         translated_window = translate_window(
-            client, window, args.model, args.srt_context
+            client=client, window=window, model=args.model, context=args.srt_context
         )
         translated_subs.extend(translated_window)
 
     # Save translated SRT
     try:
-        translated_subs.save(args.output_path, encoding="utf-8")
+        translated_subs.save(path=args.output_path, encoding="utf-8")
         print(f"Translation saved to: {args.output_path}")
     except Exception as e:
         print(f"Error saving translated SRT: {e}", file=sys.stderr)
@@ -99,7 +99,7 @@ def translate_window(client, window, model, context):
     """Translate a window of subtitle entries using OpenAI API"""
     # Build XML prompt
     xml_texts = []
-    for i, sub in enumerate(window, 1):
+    for i, sub in enumerate(window, start=1):
         xml_texts.append(f'<text id="{i}">{sub.text}</text>')
 
     context_xml = (
@@ -166,7 +166,7 @@ def parse_xml_response(response_text, expected_count):
     """Parse XML response and extract translated texts"""
     try:
         # Extract answer block
-        answer_match = re.search(r"<answer>(.*?)</answer>", response_text, re.DOTALL)
+        answer_match = re.search(pattern=r"<answer>(.*?)</answer>", string=response_text, flags=re.DOTALL)
         if not answer_match:
             raise ValueError("No <answer> block found in response")
 
@@ -174,7 +174,7 @@ def parse_xml_response(response_text, expected_count):
 
         # Parse individual text elements
         text_pattern = r'<text id="(\d+)">(.*?)</text>'
-        matches = re.findall(text_pattern, answer_content, re.DOTALL)
+        matches = re.findall(pattern=text_pattern, string=answer_content, flags=re.DOTALL)
 
         if len(matches) != expected_count:
             raise ValueError(
