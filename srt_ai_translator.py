@@ -26,7 +26,7 @@ from loguru import logger
 def main():
     # Configure logger to write to ./logs.txt with rotation and retention
     logger.add("./logs.txt", rotation="10 MB", retention="7 days", level="INFO")
-    
+
     parser = argparse.ArgumentParser(
         description="Translate SRT subtitle files using OpenAI API"
     )
