@@ -70,6 +70,7 @@ uv run srt_ai_translator.py \
 
 ### Required Arguments
 
+- `--target-language`: Target language for translation
 - `--srt-file`: Path to the input SRT file
 - `--base-url`: Base URL for the OpenAI API (must start with `http://` or `https://`)
 - `--model`: Model name to use for translation
@@ -80,7 +81,6 @@ uv run srt_ai_translator.py \
 - `--api-key`: API key for OpenAI (if not provided, uses `OPENAI_API_KEY` environment variable)
 - `--window-size`: Number of subtitle entries to process in each batch (default: 4)
 - `--srt-context`: Context information for translation (e.g., video type, dialect, domain)
-- `--target-language`: Target language for translation (default: English)
 
 ## How It Works
 
