@@ -79,6 +79,11 @@ def main():
         logger.error(f"SRT file '{args.srt_file}' not found")
         sys.exit(1)
 
+    # Crash if output file already exists to prevent accidental overwrites
+    if Path(args.output_path).exists():
+        logger.error(f"Output file '{args.output_path}' already exists. Please remove it first or choose a different output path.")
+        sys.exit(1)
+
     logger.info(f"Processing: {args.srt_file}")
     logger.info(f"Window size: {args.window_size}")
     logger.info(f"Model: {args.model}")
