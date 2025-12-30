@@ -15,9 +15,10 @@
 
 ## COMPLETED
 - SETUP: Create initial ROADMAP.md structure. REASON: coordinate development across iterations. STATUS: done
+- IMPLEMENT: Basic script structure with argparse and SRT parsing. REASON: foundation complete. STATUS: done
 
 ## IN_PROGRESS
-- IMPLEMENT: SRT file parsing using pysrt library. REASON: need to read subtitle data. STATUS: in progress
+- IMPLEMENT: Windowed text processing and OpenAI API integration. REASON: core translation functionality. STATUS: in progress
 
 ## TODO
 - P0: CREATE: Basic script structure with argparse. REASON: foundation for all functionality. COMPLEXITY: low
