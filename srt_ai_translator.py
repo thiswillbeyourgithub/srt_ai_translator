@@ -16,7 +16,7 @@ import argparse
 import sys
 from pathlib import Path
 import pysrt
-from openai import OpenAI
+from openai import OpenAI, APIConnectionError, AuthenticationError, APIStatusError
 from tqdm import tqdm
 import xml.etree.ElementTree as ET
 import re
@@ -183,9 +183,21 @@ Please think about the translation, then provide your answer in this exact forma
 
             return translated_window
 
+        except APIConnectionError as e:
+            # Connection errors should crash immediately with helpful trace
+            logger.error(f"API connection error - check network and base URL: {e}")
+            raise
+        except AuthenticationError as e:
+            # Authentication errors should crash immediately
+            logger.error(f"API authentication failed - check API key: {e}")
+            raise
+        except APIStatusError as e:
+            # API status errors (like invalid model) should crash immediately
+            logger.error(f"API returned error status - check model name and API: {e}")
+            raise
         except Exception as e:
             if attempt < max_retries - 1:
-                # Retry with error message
+                # Retry with error message for parsing errors
                 prompt += f"\n\nPrevious parsing failed with error: {str(e)}. Please correct the format and try again."
                 continue
             else:
