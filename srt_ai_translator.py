@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.8"
+# dependencies = [
+#   "pysrt",
+#   "openai",
+#   "tqdm",
+# ]
+# ///
 """
 SRT AI Translator - Translate SRT subtitle files using OpenAI API
 """
