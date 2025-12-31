@@ -90,10 +90,10 @@ uv run srt_ai_translator.py \
 - `--srt-file` OR `--video`: Path to the input SRT file OR video file (exactly one must be provided)
 - `--base-url`: Base URL for the OpenAI API (must start with `http://` or `https://`)
 - `--model`: Model name to use for translation
-- `--output-path`: Path for the output translated SRT file
 
 ### Optional Arguments
 
+- `--output-path`: Path for the output translated SRT file (if not provided, auto-generated based on input filename and target language)
 - `--api-key`: API key for OpenAI (if not provided, uses `OPENAI_API_KEY` environment variable)
 - `--window-size`: Number of subtitle entries to process in each batch (default: 4)
 - `--srt-context`: Context information for translation (e.g., video type, dialect, domain)
