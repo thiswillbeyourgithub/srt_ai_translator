@@ -44,8 +44,7 @@ def main():
     )
     parser.add_argument(
         "--output-path",
-        required=True,
-        help="Path for the output translated SRT file",
+        help="Path for the output translated SRT file (default: auto-generated based on input and target language)",
     )
     parser.add_argument(
         "--target-language",
@@ -92,7 +91,7 @@ def main():
         sys.exit(1)
 
     # Crash if output file already exists to prevent accidental overwrites
-    # This check is done early to fail fast before expensive operations
+    # This check must happen after default output path generation
     if Path(args.output_path).exists():
         logger.error(
             f"Output file '{args.output_path}' already exists. Please remove it first or choose a different output path."
@@ -170,10 +169,25 @@ def main():
             )
             logger.info(f"Extracted subtitle to temporary file: {temp_srt_path}")
             args.srt_file = temp_srt_path
+            
+            # Generate default output path if not provided
+            # Uses video filename, stream language, and target language for clarity
+            if not args.output_path:
+                video_stem = Path(args.video).stem
+                stream_lang = selected_stream.get('language', 'unknown')
+                args.output_path = f"{video_stem}_{stream_lang}_{args.target_language}.srt"
+                logger.info(f"Auto-generated output path: {args.output_path}")
         except Exception as e:
             logger.error(f"Failed to extract subtitle: {e}")
             Path(temp_srt_path).unlink(missing_ok=True)
             sys.exit(1)
+
+    # Generate default output path for SRT input if not provided
+    # Uses SRT filename and target language
+    if not args.output_path:
+        srt_stem = Path(args.srt_file).stem
+        args.output_path = f"{srt_stem}_{args.target_language}.srt"
+        logger.info(f"Auto-generated output path: {args.output_path}")
 
     # Validate input file exists
     if not Path(args.srt_file).exists():
