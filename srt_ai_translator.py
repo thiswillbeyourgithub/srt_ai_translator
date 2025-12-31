@@ -409,23 +409,33 @@ def get_subtitle_preview(video_path: str, stream_index: int) -> str:
         subs = pysrt.open(path=temp_preview_path)
 
         # Find the 5th text with at least 10 characters
+        # Track all seen texts to ensure preview is unique
         count = 0
         target_index = None
+        seen_texts = set()
+        
         for idx, sub in enumerate(subs):
-            if len(sub.text.strip()) >= 10:
+            text = sub.text.strip()
+            seen_texts.add(text)
+            if len(text) >= 10:
                 count += 1
                 if count == 5:
-                    # Now find the first text after this one
+                    # Now find the first unique text after this one
                     target_index = idx + 1
                     break
 
-        # Get the text after the 5th qualifying text
-        if target_index is not None and target_index < len(subs):
-            preview_text = subs[target_index].text.strip()
-            # Limit preview length to avoid clutter
-            if len(preview_text) > 80:
-                preview_text = preview_text[:77] + "..."
-            return preview_text
+        # Get the first unique text after the 5th qualifying text
+        if target_index is not None:
+            for idx in range(target_index, len(subs)):
+                preview_text = subs[idx].text.strip()
+                # Skip if we've seen this text before
+                if preview_text not in seen_texts:
+                    # Limit preview length to avoid clutter
+                    if len(preview_text) > 80:
+                        preview_text = preview_text[:77] + "..."
+                    return preview_text
+                # Add to seen_texts to track duplicates
+                seen_texts.add(preview_text)
 
         return ""
 
