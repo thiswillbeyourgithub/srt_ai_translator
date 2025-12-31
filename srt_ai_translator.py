@@ -169,13 +169,15 @@ def main():
             )
             logger.info(f"Extracted subtitle to temporary file: {temp_srt_path}")
             args.srt_file = temp_srt_path
-            
+
             # Generate default output path if not provided
             # Uses video filename, stream language, and target language for clarity
             if not args.output_path:
                 video_stem = Path(args.video).stem
-                stream_lang = selected_stream.get('language', 'unknown')
-                args.output_path = f"{video_stem}_{stream_lang}_{args.target_language}.srt"
+                stream_lang = selected_stream.get("language", "unknown")
+                args.output_path = (
+                    f"{video_stem}_{stream_lang}_{args.target_language}.srt"
+                )
                 logger.info(f"Auto-generated output path: {args.output_path}")
         except Exception as e:
             logger.error(f"Failed to extract subtitle: {e}")
