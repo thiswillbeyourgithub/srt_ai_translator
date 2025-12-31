@@ -413,7 +413,7 @@ def get_subtitle_preview(video_path: str, stream_index: int) -> str:
         count = 0
         target_index = None
         seen_texts = set()
-        
+
         for idx, sub in enumerate(subs):
             text = sub.text.strip()
             seen_texts.add(text)
