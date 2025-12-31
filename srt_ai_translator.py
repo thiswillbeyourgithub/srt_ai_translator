@@ -26,7 +26,7 @@ import ffmpeg
 import json
 import tempfile
 
-VERSION: str = "0.2.0"
+VERSION: str = "0.2.1"
 
 
 def main():
