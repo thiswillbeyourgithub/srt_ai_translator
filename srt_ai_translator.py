@@ -119,13 +119,13 @@ def main():
                 codec = stream.get("codec_name", "unknown")
                 title = stream.get("title", "")
                 title_str = f" - {title}" if title else ""
-                
+
                 # Get preview text to help identify the stream
                 preview = get_subtitle_preview(
                     video_path=args.video, stream_index=stream["index"]
                 )
                 preview_str = f" | Preview: {preview}" if preview else ""
-                
+
                 logger.info(f"  {idx + 1}. {lang} ({codec}){title_str}{preview_str}")
 
             while True:
@@ -373,7 +373,7 @@ def list_subtitle_streams(video_path: str) -> list:
 
 def get_subtitle_preview(video_path: str, stream_index: int) -> str:
     """Get a preview text from a subtitle stream
-    
+
     Extracts the first text that appears after the 5th text containing at least 10 characters.
     This helps identify subtitle streams when metadata is unclear.
 
@@ -383,7 +383,7 @@ def get_subtitle_preview(video_path: str, stream_index: int) -> str:
         Path to the video file
     stream_index : int
         Index of the subtitle stream
-        
+
     Returns
     -------
     str
@@ -397,17 +397,17 @@ def get_subtitle_preview(video_path: str, stream_index: int) -> str:
         )
         temp_preview_path = temp_preview_file.name
         temp_preview_file.close()
-        
+
         # Extract subtitle stream
         extract_subtitle_stream(
             video_path=video_path,
             stream_index=stream_index,
             output_path=temp_preview_path,
         )
-        
+
         # Parse and find the target text
         subs = pysrt.open(path=temp_preview_path)
-        
+
         # Find the 5th text with at least 10 characters
         count = 0
         target_index = None
@@ -418,7 +418,7 @@ def get_subtitle_preview(video_path: str, stream_index: int) -> str:
                     # Now find the first text after this one
                     target_index = idx + 1
                     break
-        
+
         # Get the text after the 5th qualifying text
         if target_index is not None and target_index < len(subs):
             preview_text = subs[target_index].text.strip()
@@ -426,9 +426,9 @@ def get_subtitle_preview(video_path: str, stream_index: int) -> str:
             if len(preview_text) > 80:
                 preview_text = preview_text[:77] + "..."
             return preview_text
-        
+
         return ""
-        
+
     except Exception as e:
         logger.debug(f"Could not extract preview for stream {stream_index}: {e}")
         return ""
