@@ -28,6 +28,13 @@ import tempfile
 
 VERSION: str = "0.2.1"
 
+# Accepted finish_reason values from the completion API. Anything else means the
+# provider did not cleanly finish the reply: "length" = truncated at the max
+# token limit, "content_filter" = censored. Such a reply must be rejected and
+# retried rather than parsed into a half-written (and likely malformed) result.
+# None is accepted because some providers omit finish_reason on a normal reply.
+_OK_FINISH_REASONS = {"stop", "end_turn", "completed", None}
+
 
 def main():
     # Configure logger to write to ./logs.txt with rotation and retention
@@ -62,6 +69,19 @@ def main():
         type=int,
         default=4,
         help="Number of subtitle entries to process in each batch (default: 4)",
+    )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=0.3,
+        help="Sampling temperature for the model (default: 0.3)",
+    )
+    parser.add_argument(
+        "--no-thinking",
+        action="store_true",
+        help="Disable model reasoning/thinking (sends OpenRouter reasoning "
+        "{'enabled': False}). Useful with reasoning models like DeepSeek to make "
+        "translation faster and cheaper. Omit to leave the provider default.",
     )
     parser.add_argument(
         "--model",
@@ -250,6 +270,8 @@ def main():
             system_prompt=system_prompt,
             api_key=args.api_key,
             api_base=args.base_url,
+            temperature=args.temperature,
+            no_thinking=args.no_thinking,
         )
         translated_subs.extend(translated_window)
 
@@ -327,17 +349,20 @@ def translate_window(
     system_prompt,
     api_key=None,
     api_base=None,
+    temperature=0.3,
+    no_thinking=False,
     max_retries=5,
     base_delay=1.0,
 ):
     """Translate a window of subtitle entries using a LiteLLM-supported provider
 
-    Retries with exponential backoff. Two failure modes are retried: transient
-    provider/network errors, and malformed replies (including replies that do not
-    contain exactly one translated chunk per input subtitle, which is enforced by
-    parse_xml_response). On a malformed reply the model's bad answer plus a
-    correction are appended as extra turns, while the [system, user] prefix is
-    kept byte-identical so it stays cacheable across retries and across windows.
+    Retries with exponential backoff. Three failure modes are retried: transient
+    provider/network errors, replies the provider did not cleanly finish (bad
+    finish_reason, e.g. truncation), and malformed replies (including replies that
+    do not contain exactly one translated chunk per input subtitle, which is
+    enforced by parse_xml_response). On a malformed reply the model's bad answer
+    plus a correction are appended as extra turns, while the [system, user] prefix
+    is kept byte-identical so it stays cacheable across retries and across windows.
     Authentication errors are never retried (they cannot succeed on retry).
 
     Parameters
@@ -354,6 +379,12 @@ def translate_window(
         environment variable.
     api_base : str, optional
         Optional API base URL override (LiteLLM api_base).
+    temperature : float, optional
+        Sampling temperature passed to the model (default: 0.3).
+    no_thinking : bool, optional
+        When True, disable model reasoning/thinking by sending OpenRouter's
+        reasoning {"enabled": False} in extra_body. When False, the reasoning
+        field is omitted so the provider default applies (default: False).
     max_retries : int, optional
         Maximum number of attempts before falling back to the untranslated
         window (default: 5).
@@ -386,14 +417,38 @@ def translate_window(
     for attempt in range(max_retries):
         # --- Call the provider (transient errors are retried with backoff) ---
         try:
-            response = litellm.completion(
+            completion_kwargs = dict(
                 model=model,
                 messages=messages,
-                temperature=0.3,
+                temperature=temperature,
                 api_key=api_key,
                 api_base=api_base,
             )
-            response_text = response.choices[0].message.content
+            # Disabling reasoning ("thinking") is an OpenRouter request-body field
+            # passed through extra_body. {"enabled": False} turns thinking off for
+            # reasoning models like DeepSeek; omitting the field entirely leaves
+            # the provider default (thinking on). Confirmed against OpenRouter.
+            if no_thinking:
+                completion_kwargs["extra_body"] = {"reasoning": {"enabled": False}}
+
+            response = litellm.completion(**completion_kwargs)
+            choice = response.choices[0]
+
+            # Finish-reason guard: reject a truncated ("length") or censored
+            # ("content_filter") completion instead of parsing a half-written
+            # reply. Raising here routes into the backoff-retry branch below.
+            finish_reason = getattr(choice, "finish_reason", None)
+            if finish_reason not in _OK_FINISH_REASONS:
+                raise RuntimeError(
+                    f"provider ended the completion with finish_reason={finish_reason!r} "
+                    f"('length' = truncated at the provider max, 'content_filter' = censored)"
+                )
+
+            response_text = choice.message.content
+            if response_text is None:
+                raise RuntimeError(
+                    f"provider returned empty content (finish_reason={finish_reason!r})"
+                )
         except litellm.AuthenticationError as e:
             # Authentication errors cannot be fixed by retrying, so crash.
             logger.error(f"API authentication failed - check API key: {e}")
