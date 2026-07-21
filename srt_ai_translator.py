@@ -37,13 +37,14 @@ def main():
         description="Translate SRT subtitle files using LiteLLM (OpenRouter by default)"
     )
 
-    parser.add_argument("--srt-file", help="Path to the input SRT file")
     parser.add_argument(
-        "--video",
-        help="Path to the input video file (will extract subtitles)",
+        "--input",
+        required=True,
+        help="Path to the input file: either an SRT subtitle file (.srt) or a "
+        "video file to extract subtitles from (any other extension).",
     )
     parser.add_argument(
-        "--output-path",
+        "--output",
         help="Path for the output translated SRT file (default: auto-generated based on input and target language)",
     )
     parser.add_argument(
@@ -52,9 +53,9 @@ def main():
         help="Target language for translation (default: English)",
     )
     parser.add_argument(
-        "--srt-context",
+        "--file-description",
         default="",
-        help="Context information for translation (e.g., video type, dialect)",
+        help="Description/context of the file to aid translation (e.g., video type, dialect, domain)",
     )
     parser.add_argument(
         "--window-size",
@@ -80,12 +81,9 @@ def main():
 
     args = parser.parse_args()
 
-    # Validate that either --srt-file or --video is provided (but not both)
-    if not args.srt_file and not args.video:
-        logger.error("Either --srt-file or --video must be provided")
-        sys.exit(1)
-    if args.srt_file and args.video:
-        logger.error("Cannot specify both --srt-file and --video")
+    # Validate the input file exists up front (covers both subtitle and video).
+    if not Path(args.input).exists():
+        logger.error(f"Input file '{args.input}' not found")
         sys.exit(1)
 
     # Validate base URL only when explicitly provided (it is optional now that
@@ -98,15 +96,19 @@ def main():
         )
         sys.exit(1)
 
-    # Handle video input - extract subtitles to temporary SRT file
-    temp_srt_file = None
-    if args.video:
-        if not Path(args.video).exists():
-            logger.error(f"Video file '{args.video}' not found")
-            sys.exit(1)
+    # Decide how to treat --input from its extension: a .srt file is used
+    # directly, anything else is treated as a video whose subtitles are
+    # extracted to a temporary SRT file first. srt_file holds the SRT path
+    # actually fed to the translator regardless of which branch was taken.
+    is_srt_input = Path(args.input).suffix.lower() == ".srt"
 
-        logger.info(f"Extracting subtitles from video: {args.video}")
-        subtitle_streams = list_subtitle_streams(video_path=args.video)
+    temp_srt_file = None
+    temp_srt_path = None
+    if is_srt_input:
+        srt_file = args.input
+    else:
+        logger.info(f"Extracting subtitles from video: {args.input}")
+        subtitle_streams = list_subtitle_streams(video_path=args.input)
 
         if not subtitle_streams:
             logger.error("No subtitle streams found in video")
@@ -129,7 +131,7 @@ def main():
 
                 # Get preview text to help identify the stream
                 preview = get_subtitle_preview(
-                    video_path=args.video, stream_index=stream["index"]
+                    video_path=args.input, stream_index=stream["index"]
                 )
                 preview_str = f" | Preview: {preview}" if preview else ""
 
@@ -163,22 +165,20 @@ def main():
 
         try:
             extract_subtitle_stream(
-                video_path=args.video,
+                video_path=args.input,
                 stream_index=selected_stream["index"],
                 output_path=temp_srt_path,
             )
             logger.info(f"Extracted subtitle to temporary file: {temp_srt_path}")
-            args.srt_file = temp_srt_path
+            srt_file = temp_srt_path
 
             # Generate default output path if not provided
             # Uses video filename, stream language, and target language for clarity
-            if not args.output_path:
-                video_stem = Path(args.video).stem
+            if not args.output:
+                video_stem = Path(args.input).stem
                 stream_lang = selected_stream.get("language", "unknown")
-                args.output_path = (
-                    f"{video_stem}_{stream_lang}_{args.target_language}.srt"
-                )
-                logger.info(f"Auto-generated output path: {args.output_path}")
+                args.output = f"{video_stem}_{stream_lang}_{args.target_language}.srt"
+                logger.info(f"Auto-generated output path: {args.output}")
         except Exception as e:
             logger.error(f"Failed to extract subtitle: {e}")
             Path(temp_srt_path).unlink(missing_ok=True)
@@ -186,37 +186,32 @@ def main():
 
     # Generate default output path for SRT input if not provided
     # Uses SRT filename and target language
-    if not args.output_path:
-        srt_stem = Path(args.srt_file).stem
-        args.output_path = f"{srt_stem}_{args.target_language}.srt"
-        logger.info(f"Auto-generated output path: {args.output_path}")
+    if not args.output:
+        srt_stem = Path(srt_file).stem
+        args.output = f"{srt_stem}_{args.target_language}.srt"
+        logger.info(f"Auto-generated output path: {args.output}")
 
     # Crash if output file already exists to prevent accidental overwrites.
     # This check is placed AFTER default output path generation so that it also
     # guards auto-generated paths (not just user-supplied ones) and never runs
-    # against an unset (None) --output-path, which would raise a TypeError.
-    if Path(args.output_path).exists():
+    # against an unset (None) --output, which would raise a TypeError.
+    if Path(args.output).exists():
         logger.error(
-            f"Output file '{args.output_path}' already exists. Please remove it first or choose a different output path."
+            f"Output file '{args.output}' already exists. Please remove it first or choose a different output path."
         )
         sys.exit(1)
 
-    # Validate input file exists
-    if not Path(args.srt_file).exists():
-        logger.error(f"SRT file '{args.srt_file}' not found")
-        sys.exit(1)
-
-    logger.info(f"Processing: {args.srt_file}")
+    logger.info(f"Processing: {srt_file}")
     logger.info(f"Window size: {args.window_size}")
     logger.info(f"Model: {args.model}")
-    logger.info(f"Output: {args.output_path}")
+    logger.info(f"Output: {args.output}")
     logger.info(f"Target language: {args.target_language}")
-    if args.srt_context:
-        logger.info(f"Context: {args.srt_context}")
+    if args.file_description:
+        logger.info(f"File description: {args.file_description}")
 
     # Parse SRT file
     try:
-        subs = pysrt.open(path=args.srt_file)
+        subs = pysrt.open(path=srt_file)
         logger.info(f"Loaded {len(subs)} subtitle entries")
     except Exception as e:
         logger.error(f"Error parsing SRT file: {e}")
@@ -228,8 +223,8 @@ def main():
 
     # Process subtitles in windows
     translated_subs = pysrt.SubRipFile()
-    tmp_output_path = Path(args.output_path).with_suffix(
-        Path(args.output_path).suffix + ".tmp"
+    tmp_output_path = Path(args.output).with_suffix(
+        Path(args.output).suffix + ".tmp"
     )
 
     # Create windows of subtitles
@@ -245,7 +240,7 @@ def main():
         translated_window = translate_window(
             window=window,
             model=args.model,
-            context=args.srt_context,
+            context=args.file_description,
             target_language=args.target_language,
             api_key=args.api_key,
             api_base=args.base_url,
@@ -263,8 +258,8 @@ def main():
     # Atomically rename temp file to final output
     # This ensures the final output is written atomically
     try:
-        tmp_output_path.rename(args.output_path)
-        logger.info(f"Translation saved to: {args.output_path}")
+        tmp_output_path.rename(args.output)
+        logger.info(f"Translation saved to: {args.output}")
     except Exception as e:
         logger.error(f"Error finalizing output file: {e}")
         sys.exit(1)
@@ -305,9 +300,9 @@ def translate_window(
         )
 
     context_xml = (
-        f"<srt-context>{context}</srt-context>"
+        f"<file-description>{context}</file-description>"
         if context
-        else "<srt-context></srt-context>"
+        else "<file-description></file-description>"
     )
 
     prompt = f"""Please translate the following subtitle texts to {target_language}. Think about the context and provide accurate translations.
