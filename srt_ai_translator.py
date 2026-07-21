@@ -48,7 +48,7 @@ def main():
     )
     parser.add_argument(
         "--target-language",
-        required=True,
+        default="English",
         help="Target language for translation (default: English)",
     )
     parser.add_argument(
@@ -87,14 +87,6 @@ def main():
     ):
         logger.error(
             f"Base URL must start with http:// or https://, got: {args.base_url}"
-        )
-        sys.exit(1)
-
-    # Crash if output file already exists to prevent accidental overwrites
-    # This check must happen after default output path generation
-    if Path(args.output_path).exists():
-        logger.error(
-            f"Output file '{args.output_path}' already exists. Please remove it first or choose a different output path."
         )
         sys.exit(1)
 
@@ -190,6 +182,16 @@ def main():
         srt_stem = Path(args.srt_file).stem
         args.output_path = f"{srt_stem}_{args.target_language}.srt"
         logger.info(f"Auto-generated output path: {args.output_path}")
+
+    # Crash if output file already exists to prevent accidental overwrites.
+    # This check is placed AFTER default output path generation so that it also
+    # guards auto-generated paths (not just user-supplied ones) and never runs
+    # against an unset (None) --output-path, which would raise a TypeError.
+    if Path(args.output_path).exists():
+        logger.error(
+            f"Output file '{args.output_path}' already exists. Please remove it first or choose a different output path."
+        )
+        sys.exit(1)
 
     # Validate input file exists
     if not Path(args.srt_file).exists():
