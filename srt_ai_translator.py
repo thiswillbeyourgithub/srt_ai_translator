@@ -3,27 +3,27 @@
 # requires-python = ">=3.8"
 # dependencies = [
 #   "pysrt",
-#   "openai",
+#   "litellm",
 #   "tqdm",
 #   "loguru",
 #   "ffmpeg-python",
 # ]
 # ///
 """
-SRT AI Translator - Translate SRT subtitle files using OpenAI API
+SRT AI Translator - Translate SRT subtitle files using any LiteLLM-supported
+provider (OpenRouter by default), with windowed processing and context awareness.
 """
 
 import argparse
 import sys
+import time
 from pathlib import Path
 import pysrt
-from openai import OpenAI, APIConnectionError, AuthenticationError, APIStatusError
+import litellm
 from tqdm import tqdm
-import xml.etree.ElementTree as ET
 import re
 from loguru import logger
 import ffmpeg
-import json
 import tempfile
 
 VERSION: str = "0.2.1"
@@ -34,7 +34,7 @@ def main():
     logger.add("./logs.txt", rotation="10 MB", retention="7 days", level="INFO")
 
     parser = argparse.ArgumentParser(
-        description="Translate SRT subtitle files using OpenAI API"
+        description="Translate SRT subtitle files using LiteLLM (OpenRouter by default)"
     )
 
     parser.add_argument("--srt-file", help="Path to the input SRT file")
@@ -63,12 +63,19 @@ def main():
         help="Number of subtitle entries to process in each batch (default: 4)",
     )
     parser.add_argument(
-        "--model", required=True, help="Model name to use for translation"
+        "--model",
+        default="openrouter/deepseek/deepseek-v4-pro",
+        help="LiteLLM model name to use for translation (default: openrouter/deepseek/deepseek-v4-pro)",
     )
-    parser.add_argument("--base-url", required=True, help="Base URL for the OpenAI API")
+    parser.add_argument(
+        "--base-url",
+        help="Optional API base URL override (LiteLLM api_base). Only needed for "
+        "custom/self-hosted endpoints; not required for OpenRouter.",
+    )
     parser.add_argument(
         "--api-key",
-        help="API key for OpenAI (if not provided, uses OPENAI_API_KEY environment variable)",
+        help="API key for the provider. If not provided, LiteLLM falls back to the "
+        "provider's standard environment variable (e.g. OPENROUTER_API_KEY).",
     )
 
     args = parser.parse_args()
@@ -81,8 +88,9 @@ def main():
         logger.error("Cannot specify both --srt-file and --video")
         sys.exit(1)
 
-    # Validate base URL starts with http:// or https://
-    if not (
+    # Validate base URL only when explicitly provided (it is optional now that
+    # LiteLLM routes to the provider based on the model prefix).
+    if args.base_url and not (
         args.base_url.startswith("http://") or args.base_url.startswith("https://")
     ):
         logger.error(
@@ -214,9 +222,9 @@ def main():
         logger.error(f"Error parsing SRT file: {e}")
         sys.exit(1)
 
-    # Initialize OpenAI client
-    # If api_key is not provided, OpenAI client will use OPENAI_API_KEY environment variable
-    client = OpenAI(base_url=args.base_url, api_key=args.api_key)
+    # LiteLLM is stateless (no client object): credentials and the optional base
+    # URL are passed per-call. When api_key is None, LiteLLM falls back to the
+    # provider's standard environment variable (e.g. OPENROUTER_API_KEY).
 
     # Process subtitles in windows
     translated_subs = pysrt.SubRipFile()
@@ -235,11 +243,12 @@ def main():
     # Process each window with progress bar
     for window_idx, window in enumerate(tqdm(iterable=windows, desc="Translating")):
         translated_window = translate_window(
-            client=client,
             window=window,
             model=args.model,
             context=args.srt_context,
             target_language=args.target_language,
+            api_key=args.api_key,
+            api_base=args.base_url,
         )
         translated_subs.extend(translated_window)
 
@@ -266,21 +275,26 @@ def main():
             logger.info("Cleaned up temporary subtitle file")
 
 
-def translate_window(client, window, model, context, target_language):
-    """Translate a window of subtitle entries using OpenAI API
+def translate_window(
+    window, model, context, target_language, api_key=None, api_base=None
+):
+    """Translate a window of subtitle entries using a LiteLLM-supported provider
 
     Parameters
     ----------
-    client : OpenAI
-        OpenAI client instance
     window : list
         List of subtitle entries to translate
     model : str
-        Model name to use for translation
+        LiteLLM model name to use for translation
     context : str
         Context information for translation
     target_language : str
         Target language for translation
+    api_key : str, optional
+        API key for the provider. If None, LiteLLM uses the provider's standard
+        environment variable.
+    api_base : str, optional
+        Optional API base URL override (LiteLLM api_base).
     """
     # Build XML prompt with timing information
     # Including timing helps the LLM understand temporal context (e.g., rapid dialogue vs. long pauses)
@@ -314,10 +328,12 @@ Please think about the translation, then provide your answer in this exact forma
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            response = client.chat.completions.create(
+            response = litellm.completion(
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.3,
+                api_key=api_key,
+                api_base=api_base,
             )
 
             response_text = response.choices[0].message.content
@@ -338,17 +354,13 @@ Please think about the translation, then provide your answer in this exact forma
 
             return translated_window
 
-        except APIConnectionError as e:
+        except litellm.APIConnectionError as e:
             # Connection errors should crash immediately with helpful trace
             logger.error(f"API connection error - check network and base URL: {e}")
             raise
-        except AuthenticationError as e:
+        except litellm.AuthenticationError as e:
             # Authentication errors should crash immediately
             logger.error(f"API authentication failed - check API key: {e}")
-            raise
-        except APIStatusError as e:
-            # API status errors (like invalid model) should crash immediately
-            logger.error(f"API returned error status - check model name and API: {e}")
             raise
         except Exception as e:
             if attempt < max_retries - 1:
