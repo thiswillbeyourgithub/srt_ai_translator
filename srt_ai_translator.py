@@ -223,9 +223,7 @@ def main():
 
     # Process subtitles in windows
     translated_subs = pysrt.SubRipFile()
-    tmp_output_path = Path(args.output).with_suffix(
-        Path(args.output).suffix + ".tmp"
-    )
+    tmp_output_path = Path(args.output).with_suffix(Path(args.output).suffix + ".tmp")
 
     # Create windows of subtitles
     windows = []
@@ -235,13 +233,21 @@ def main():
 
     logger.info(f"Processing {len(windows)} windows...")
 
+    # Build the system prompt ONCE and reuse the identical object for every
+    # window. All run-constant instructions (target language, file description,
+    # output format) live here so the leading portion of every request is
+    # byte-identical, which lets providers reuse their KV/prompt cache across
+    # windows instead of re-processing the instructions each time.
+    system_prompt = build_system_prompt(
+        target_language=args.target_language, file_description=args.file_description
+    )
+
     # Process each window with progress bar
     for window_idx, window in enumerate(tqdm(iterable=windows, desc="Translating")):
         translated_window = translate_window(
             window=window,
             model=args.model,
-            context=args.file_description,
-            target_language=args.target_language,
+            system_prompt=system_prompt,
             api_key=args.api_key,
             api_base=args.base_url,
         )
@@ -270,104 +276,185 @@ def main():
             logger.info("Cleaned up temporary subtitle file")
 
 
-def translate_window(
-    window, model, context, target_language, api_key=None, api_base=None
-):
-    """Translate a window of subtitle entries using a LiteLLM-supported provider
+def build_system_prompt(target_language: str, file_description: str) -> str:
+    """Build the run-constant system prompt shared by every window.
+
+    Everything that does not change between windows (target language, file
+    description, output format and rules) lives here so that the leading portion
+    of every request is byte-identical. Reusing an identical prefix is what lets
+    providers serve it from their prompt/KV cache instead of re-processing it for
+    each window, which is the whole point of factoring it out of the per-window
+    user message.
 
     Parameters
     ----------
-    window : list
-        List of subtitle entries to translate
-    model : str
-        LiteLLM model name to use for translation
-    context : str
-        Context information for translation
     target_language : str
-        Target language for translation
-    api_key : str, optional
-        API key for the provider. If None, LiteLLM uses the provider's standard
-        environment variable.
-    api_base : str, optional
-        Optional API base URL override (LiteLLM api_base).
-    """
-    # Build XML prompt with timing information
-    # Including timing helps the LLM understand temporal context (e.g., rapid dialogue vs. long pauses)
-    xml_texts = []
-    for i, sub in enumerate(window, start=1):
-        xml_texts.append(
-            f'<text id="{i}" start="{sub.start}" end="{sub.end}">{sub.text}</text>'
-        )
+        Target language for translation.
+    file_description : str
+        Description/context of the file to aid translation (may be empty).
 
-    context_xml = (
-        f"<file-description>{context}</file-description>"
-        if context
+    Returns
+    -------
+    str
+        The system prompt.
+    """
+    file_description_xml = (
+        f"<file-description>{file_description}</file-description>"
+        if file_description
         else "<file-description></file-description>"
     )
 
-    prompt = f"""Please translate the following subtitle texts to {target_language}. Think about the context and provide accurate translations.
+    return f"""You are a professional subtitle translator. Translate every subtitle text the user sends into {target_language}, producing accurate and natural translations that respect the context.
 
-The timing information (start/end) is provided to help you understand the temporal context - whether this is rapid dialogue or if significant time has passed between subtitles.
+Each subtitle is provided as an XML element of the form:
+<text id="N" start="HH:MM:SS,mmm" end="HH:MM:SS,mmm">original text</text>
+The start/end timing is context only (it tells you whether this is rapid dialogue or if significant time has passed between subtitles); never translate, echo or alter the ids or the timings.
 
-{context_xml}
+The following describes the file being translated (may be empty):
+{file_description_xml}
 
-{chr(10).join(xml_texts)}
-
-Please think about the translation, then provide your answer in this exact format:
+Reply with EXACTLY one <text> element per input subtitle, reusing the same ids, wrapped in a single <answer> block, and output nothing else, in this exact format:
 <answer>
 <text id="1">translated text here</text>
 <text id="2">translated text here</text>
 ...
 </answer>"""
 
-    max_retries = 3
+
+def translate_window(
+    window,
+    model,
+    system_prompt,
+    api_key=None,
+    api_base=None,
+    max_retries=5,
+    base_delay=1.0,
+):
+    """Translate a window of subtitle entries using a LiteLLM-supported provider
+
+    Retries with exponential backoff. Two failure modes are retried: transient
+    provider/network errors, and malformed replies (including replies that do not
+    contain exactly one translated chunk per input subtitle, which is enforced by
+    parse_xml_response). On a malformed reply the model's bad answer plus a
+    correction are appended as extra turns, while the [system, user] prefix is
+    kept byte-identical so it stays cacheable across retries and across windows.
+    Authentication errors are never retried (they cannot succeed on retry).
+
+    Parameters
+    ----------
+    window : list
+        List of subtitle entries to translate.
+    model : str
+        LiteLLM model name to use for translation.
+    system_prompt : str
+        Run-constant system prompt (see build_system_prompt); identical across
+        windows to maximize provider-side prompt/KV caching.
+    api_key : str, optional
+        API key for the provider. If None, LiteLLM uses the provider's standard
+        environment variable.
+    api_base : str, optional
+        Optional API base URL override (LiteLLM api_base).
+    max_retries : int, optional
+        Maximum number of attempts before falling back to the untranslated
+        window (default: 5).
+    base_delay : float, optional
+        Base delay in seconds for exponential backoff; attempt N waits
+        base_delay * 2**N seconds (default: 1.0).
+
+    Returns
+    -------
+    list
+        Translated SubRipItem entries, or the original (untranslated) window as a
+        fallback if every attempt fails.
+    """
+    # Build the variable, per-window user message: only the subtitle texts (with
+    # timing) go here. Keeping this separate from the constant system prompt is
+    # what makes the cacheable prefix identical across windows.
+    xml_texts = [
+        f'<text id="{i}" start="{sub.start}" end="{sub.end}">{sub.text}</text>'
+        for i, sub in enumerate(window, start=1)
+    ]
+    user_content = "Translate these subtitles:\n" + "\n".join(xml_texts)
+
+    # The [system, user] prefix stays constant; correction turns are only ever
+    # appended after it, preserving the cacheable prefix.
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_content},
+    ]
+
     for attempt in range(max_retries):
+        # --- Call the provider (transient errors are retried with backoff) ---
         try:
             response = litellm.completion(
                 model=model,
-                messages=[{"role": "user", "content": prompt}],
+                messages=messages,
                 temperature=0.3,
                 api_key=api_key,
                 api_base=api_base,
             )
-
             response_text = response.choices[0].message.content
-            translated_texts = parse_xml_response(response_text, len(window))
-
-            # Create translated subtitle entries
-            translated_window = []
-            for i, (original_sub, translated_text) in enumerate(
-                zip(window, translated_texts)
-            ):
-                new_sub = pysrt.SubRipItem(
-                    index=original_sub.index,
-                    start=original_sub.start,
-                    end=original_sub.end,
-                    text=translated_text,
-                )
-                translated_window.append(new_sub)
-
-            return translated_window
-
-        except litellm.APIConnectionError as e:
-            # Connection errors should crash immediately with helpful trace
-            logger.error(f"API connection error - check network and base URL: {e}")
-            raise
         except litellm.AuthenticationError as e:
-            # Authentication errors should crash immediately
+            # Authentication errors cannot be fixed by retrying, so crash.
             logger.error(f"API authentication failed - check API key: {e}")
             raise
         except Exception as e:
             if attempt < max_retries - 1:
-                # Retry with error message for parsing errors
-                prompt += f"\n\nPrevious parsing failed with error: {str(e)}. Please correct the format and try again."
-                continue
-            else:
-                logger.error(
-                    f"Failed to translate window after {max_retries} attempts: {e}"
+                delay = base_delay * (2**attempt)
+                logger.warning(
+                    f"Provider call failed (attempt {attempt + 1}/{max_retries}): {e}. "
+                    f"Retrying in {delay:.1f}s"
                 )
-                # Return original texts as fallback
-                return window
+                time.sleep(delay)
+                continue
+            logger.error(
+                f"Failed to translate window after {max_retries} attempts: {e}"
+            )
+            # Return original texts as fallback so the run can still complete.
+            return window
+
+        # --- Validate the reply: must parse and yield exactly len(window) chunks ---
+        try:
+            translated_texts = parse_xml_response(response_text, len(window))
+        except Exception as e:
+            if attempt < max_retries - 1:
+                delay = base_delay * (2**attempt)
+                logger.warning(
+                    f"Invalid response (attempt {attempt + 1}/{max_retries}): {e}. "
+                    f"Retrying in {delay:.1f}s"
+                )
+                # Append the bad answer and a correction as new turns; the
+                # [system, user] prefix above is left untouched for caching.
+                messages = messages + [
+                    {"role": "assistant", "content": response_text},
+                    {
+                        "role": "user",
+                        "content": (
+                            f"That response was invalid: {e}. Re-send the translation "
+                            f"for ALL {len(window)} subtitles, exactly one <text> "
+                            f"element per id, in the required <answer> format and nothing else."
+                        ),
+                    },
+                ]
+                time.sleep(delay)
+                continue
+            logger.error(
+                f"Failed to parse a valid response after {max_retries} attempts: {e}"
+            )
+            return window
+
+        # --- Success: build the translated subtitle entries ---
+        translated_window = []
+        for original_sub, translated_text in zip(window, translated_texts):
+            new_sub = pysrt.SubRipItem(
+                index=original_sub.index,
+                start=original_sub.start,
+                end=original_sub.end,
+                text=translated_text,
+            )
+            translated_window.append(new_sub)
+
+        return translated_window
 
 
 def list_subtitle_streams(video_path: str) -> list:
