@@ -472,11 +472,15 @@ def translate_window(
         try:
             translated_texts = parse_xml_response(response_text, len(window))
         except Exception as e:
+            # Log a truncated snippet of the raw reply so parsing failures are
+            # diagnosable (e.g. spotting unexpected tag shapes) without dumping
+            # the whole, potentially large, response into the logs.
+            snippet = response_text.strip().replace("\n", " ")[:300]
             if attempt < max_retries - 1:
                 delay = base_delay * (2**attempt)
                 logger.warning(
                     f"Invalid response (attempt {attempt + 1}/{max_retries}): {e}. "
-                    f"Retrying in {delay:.1f}s"
+                    f"Retrying in {delay:.1f}s. Raw reply (truncated): {snippet!r}"
                 )
                 # Append the bad answer and a correction as new turns; the
                 # [system, user] prefix above is left untouched for caching.
@@ -494,7 +498,8 @@ def translate_window(
                 time.sleep(delay)
                 continue
             logger.error(
-                f"Failed to parse a valid response after {max_retries} attempts: {e}"
+                f"Failed to parse a valid response after {max_retries} attempts: {e}. "
+                f"Raw reply (truncated): {snippet!r}"
             )
             return window
 
@@ -648,19 +653,28 @@ def extract_subtitle_stream(video_path: str, stream_index: int, output_path: str
 def parse_xml_response(response_text, expected_count):
     """Parse XML response and extract translated texts"""
     try:
-        # Extract answer block
+        # Extract answer block (case-insensitive so <Answer>/<ANSWER> also match)
         answer_match = re.search(
-            pattern=r"<answer>(.*?)</answer>", string=response_text, flags=re.DOTALL
+            pattern=r"<answer>(.*?)</answer>",
+            string=response_text,
+            flags=re.DOTALL | re.IGNORECASE,
         )
         if not answer_match:
             raise ValueError("No <answer> block found in response")
 
         answer_content = answer_match.group(1)
 
-        # Parse individual text elements
-        text_pattern = r'<text id="(\d+)">(.*?)</text>'
+        # Parse individual <text> elements. The pattern is deliberately lenient
+        # because models frequently mirror the input tag and re-emit the start/end
+        # timing attributes (e.g. <text id="1" start="..." end="...">) despite the
+        # instruction not to: [^>]* swallows any extra attributes after the id, and
+        # the id quotes are optional. Being strict here caused every element to
+        # fail to match ("Expected N text elements, found 0").
+        text_pattern = r'<text\s+id=["\']?(\d+)["\']?[^>]*>(.*?)</text>'
         matches = re.findall(
-            pattern=text_pattern, string=answer_content, flags=re.DOTALL
+            pattern=text_pattern,
+            string=answer_content,
+            flags=re.DOTALL | re.IGNORECASE,
         )
 
         if len(matches) != expected_count:
