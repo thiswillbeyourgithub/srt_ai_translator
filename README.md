@@ -8,8 +8,9 @@ Translate SRT subtitle files using any [LiteLLM](https://github.com/BerriAI/lite
 - **Windowed Translation**: Processes subtitles in configurable batches to maintain context and optimize API usage
 - **100+ Providers via LiteLLM**: Works with OpenRouter (default), OpenAI, Anthropic, local LLMs and any other LiteLLM-supported backend, selected purely by the model name
 - **Context-Aware**: Supports a custom file description for better translations (video type, dialect, domain-specific terminology)
-- **Robust Error Handling**: Automatic retry with exponential backoff on both transient provider errors and malformed replies, with feedback to the model
+- **Robust Error Handling**: Automatic retry with exponential backoff on transient provider errors, unclean completions (truncated/censored `finish_reason`), and malformed replies, with feedback to the model
 - **Chunk-Count Validation**: Only accepts a reply that returns exactly one translated entry per input subtitle
+- **Reasoning Control**: `--no-thinking` disables model reasoning (e.g. for DeepSeek) for faster, cheaper runs
 - **Prompt Cache Friendly**: Reuses an identical system prompt across every window to maximize provider-side prompt/KV caching
 - **Progress Tracking**: Real-time progress bar using tqdm
 - **Incremental Saves**: Saves progress after each window to allow recovery on failure
@@ -49,6 +50,15 @@ uv run srt_ai_translator.py \
 ```
 
 The output path is auto-generated (here `input_English.srt`) unless you pass `--output`.
+
+For a faster, cheaper run with a reasoning model, disable thinking:
+
+```bash
+uv run srt_ai_translator.py \
+  --input input.srt \
+  --target-language English \
+  --no-thinking
+```
 
 ### Extract and Translate from Video
 
@@ -106,6 +116,8 @@ uv run srt_ai_translator.py \
 - `--api-key`: API key for the provider (if not provided, LiteLLM uses the provider's standard environment variable, e.g. `OPENROUTER_API_KEY`)
 - `--window-size`: Number of subtitle entries to process in each batch (default: 4)
 - `--file-description`: Description/context of the file to aid translation (e.g., video type, dialect, domain)
+- `--temperature`: Sampling temperature for the model (default: 0.3)
+- `--no-thinking`: Disable model reasoning/thinking (sends OpenRouter `reasoning {"enabled": false}`); useful with reasoning models like DeepSeek to translate faster and cheaper. Omit to leave the provider default.
 
 ## How It Works
 
@@ -134,7 +146,7 @@ uv run srt_ai_translator.py \
    - Long pauses might indicate scene changes
    - Helps maintain natural flow in translations
 
-5. **Retry Logic**: On a transient provider error, or a malformed reply (including one that does not return exactly one translated entry per input subtitle), the script:
+5. **Retry Logic**: On a transient provider error, an unclean completion (a `finish_reason` other than `stop`/`end_turn`/`completed`, i.e. truncated or censored, or empty content), or a malformed reply (including one that does not return exactly one translated entry per input subtitle), the script:
    - Retries with exponential backoff (up to 5 attempts per window)
    - On a malformed reply, appends the error as feedback and asks the model to correct the format (leaving the cacheable prefix untouched)
    - Crashes immediately on authentication errors (retrying cannot help)
