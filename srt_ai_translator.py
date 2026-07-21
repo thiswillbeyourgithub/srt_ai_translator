@@ -15,6 +15,7 @@ provider (OpenRouter by default), with windowed processing and context awareness
 """
 
 import argparse
+import os
 import sys
 import time
 from pathlib import Path
@@ -243,7 +244,17 @@ def main():
 
     # Process subtitles in windows
     translated_subs = pysrt.SubRipFile()
+
+    # Continuous-progress file: sits right next to the final output with ".tmp"
+    # appended, and is rewritten after every window so a crash/interrupt leaves a
+    # usable partial translation to recover from. Reset it up front so we never
+    # resume on top of a stale ".tmp" left by a previous (crashed) run.
     tmp_output_path = Path(args.output).with_suffix(Path(args.output).suffix + ".tmp")
+    try:
+        atomic_save_srt(subs=translated_subs, dest=tmp_output_path)
+    except Exception as e:
+        logger.error(f"Error initializing temporary output file: {e}")
+        sys.exit(1)
 
     # Create windows of subtitles
     windows = []
@@ -275,18 +286,21 @@ def main():
         )
         translated_subs.extend(translated_window)
 
-        # Write current progress to temporary file after each window
-        # This allows continuous incremental updates and recovery on failure
+        # Write current progress to the temporary file after each window for
+        # continuous incremental updates and recovery on failure. The write is
+        # atomic (see atomic_save_srt), so an interrupt mid-save never leaves a
+        # corrupt ".tmp" - it keeps the previous window's complete contents.
         try:
-            translated_subs.save(path=str(tmp_output_path), encoding="utf-8")
+            atomic_save_srt(subs=translated_subs, dest=tmp_output_path)
         except Exception as e:
             logger.error(f"Error saving progress to temporary file: {e}")
             sys.exit(1)
 
-    # Atomically rename temp file to final output
-    # This ensures the final output is written atomically
+    # Atomically move the completed temp file onto the final output. os.replace
+    # is atomic on the same filesystem (tmp_output_path is a sibling of output),
+    # so the final file appears fully written or not at all.
     try:
-        tmp_output_path.rename(args.output)
+        os.replace(tmp_output_path, args.output)
         logger.info(f"Translation saved to: {args.output}")
     except Exception as e:
         logger.error(f"Error finalizing output file: {e}")
@@ -296,6 +310,37 @@ def main():
         if temp_srt_file:
             Path(temp_srt_path).unlink(missing_ok=True)
             logger.info("Cleaned up temporary subtitle file")
+
+
+def atomic_save_srt(subs, dest) -> None:
+    """Save a SubRipFile to dest atomically to avoid corruption on interruption.
+
+    The subtitles are first written to a scratch file in the SAME directory as
+    dest, then os.replace()'d onto dest. os.replace is atomic on a single
+    filesystem (keeping the scratch a sibling of dest guarantees that), so a
+    crash or interrupt during the write leaves dest either at its previous
+    complete contents or fully updated, never half-written. The scratch file is
+    removed if anything fails before the replace.
+
+    Parameters
+    ----------
+    subs : pysrt.SubRipFile
+        The subtitle file to persist.
+    dest : str or pathlib.Path
+        Destination path to atomically write.
+    """
+    dest = Path(dest)
+    # ".part" scratch next to dest so the subsequent os.replace stays on one
+    # filesystem (a cross-filesystem replace would not be atomic).
+    scratch = dest.with_name(dest.name + ".part")
+    try:
+        subs.save(path=str(scratch), encoding="utf-8")
+        os.replace(scratch, dest)
+    finally:
+        # Only reached with scratch still present if save() failed or os.replace
+        # did not consume it; a successful replace leaves nothing to clean up.
+        if scratch.exists():
+            scratch.unlink(missing_ok=True)
 
 
 def build_system_prompt(target_language: str, file_description: str) -> str:
