@@ -152,10 +152,10 @@ uv run srt_ai_translator.py \
    - Crashes immediately on authentication errors (retrying cannot help)
    - Falls back to original text if all attempts fail
 
-6. **Incremental Saves**: After each successfully translated window:
-   - Results are written to a temporary file
-   - Allows recovery if the process is interrupted
-   - Final output is atomically renamed on completion
+6. **Incremental Saves**: A continuous-progress file sits next to the output with `.tmp` appended (e.g. `movie_en.srt.tmp`):
+   - It is reset at the very start so a run never resumes on top of a stale `.tmp` from a previous crash
+   - After each successfully translated window it is rewritten atomically (write to a sibling scratch, then `os.replace`), so an interrupt mid-write never corrupts it, it keeps the last complete window's contents
+   - On completion it is atomically moved onto the final output
 
 ## Error Handling
 
