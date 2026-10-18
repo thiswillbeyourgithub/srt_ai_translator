@@ -83,11 +83,12 @@ def main():
     )
     parser.add_argument(
         "--subtitle-stream",
-        type=int,
-        metavar="N",
-        help="When --input is a video with several subtitle streams, the "
-        "1-based number of the stream to translate (default: use the only "
-        "stream, or list them and exit if there are several). Ignored for .srt input.",
+        metavar="NAME_OR_N",
+        help="When --input is a video with several subtitle streams, which one "
+        "to translate: its quoted name as listed (exact match, else the unique "
+        "name starting with it, case-insensitive) or its 1-based number "
+        "(default: use the only stream, or list them and exit if there are "
+        "several). Ignored for .srt input.",
     )
     parser.add_argument(
         "--temperature",
@@ -159,7 +160,7 @@ def main():
         if args.subtitle_stream is None and len(subtitle_streams) > 1:
             logger.error(
                 f"Found {len(subtitle_streams)} subtitle streams, pick one "
-                "with --subtitle-stream N:"
+                "with --subtitle-stream NAME_OR_N:"
             )
             for idx, stream in enumerate(subtitle_streams, start=1):
                 logger.error(
@@ -168,12 +169,12 @@ def main():
                 )
             sys.exit(1)
 
-        choice = args.subtitle_stream or 1
-        if not 1 <= choice <= len(subtitle_streams):
-            logger.error(
-                f"--subtitle-stream must be between 1 and {len(subtitle_streams)}, "
-                f"got: {choice}"
+        try:
+            choice = select_subtitle_stream(
+                streams=subtitle_streams, choice=args.subtitle_stream or "1"
             )
+        except ValueError as e:
+            logger.error(str(e))
             sys.exit(1)
         selected_stream = subtitle_streams[choice - 1]
         logger.info(
@@ -599,10 +600,60 @@ def list_subtitle_streams(video_path: str) -> list:
         raise
 
 
+def subtitle_stream_name(stream: dict) -> str:
+    """Name of a subtitle stream used for display and --subtitle-stream matching
+
+    ffprobe stores language and title under the stream's "tags". The title is
+    preferred as it is the most specific, e.g. {"tags": {"language": "eng",
+    "title": "English SDH"}} -> "English SDH", {"tags": {"language": "fre"}}
+    -> "fre".
+    """
+    tags = stream.get("tags", {})
+    return tags.get("title") or tags.get("language") or "unknown"
+
+
+def select_subtitle_stream(streams: list, choice: str) -> int:
+    """Resolve a --subtitle-stream value to a 1-based stream number
+
+    An all-digit choice is a stream number. Otherwise names (see
+    subtitle_stream_name) are matched exactly, then case-insensitively by
+    prefix. For names ["English", "English SDH", "fre"]: "English" -> 1
+    (exact wins over prefix), "fr" -> 3, "Eng" -> error (two prefix matches).
+
+    Raises
+    ------
+    ValueError
+        If the choice is out of range, matches nothing, or is ambiguous.
+    """
+    if choice.isdigit():
+        number = int(choice)
+        if not 1 <= number <= len(streams):
+            raise ValueError(
+                f"--subtitle-stream must be between 1 and {len(streams)}, got: {number}"
+            )
+        return number
+
+    names = [subtitle_stream_name(stream) for stream in streams]
+    matches = [i for i, name in enumerate(names, start=1) if name == choice]
+    if not matches:
+        matches = [
+            i
+            for i, name in enumerate(names, start=1)
+            if name.lower().startswith(choice.lower())
+        ]
+    if len(matches) == 1:
+        return matches[0]
+    quoted = ", ".join(f'"{name}"' for name in names)
+    if not matches:
+        raise ValueError(f'--subtitle-stream "{choice}" matches none of: {quoted}')
+    raise ValueError(
+        f'--subtitle-stream "{choice}" is ambiguous, it matches streams '
+        f"{matches} of: {quoted}. Use the stream number instead."
+    )
+
+
 def describe_subtitle_stream(video_path: str, stream: dict) -> str:
     """Human readable one-line description of a subtitle stream
-
-    ffprobe stores language and title under the stream's "tags".
 
     Parameters
     ----------
@@ -614,16 +665,13 @@ def describe_subtitle_stream(video_path: str, stream: dict) -> str:
     Returns
     -------
     str
-        e.g. "fre (subrip) - Forced | Preview: Bonjour"
+        e.g. '"Forced" (fre, subrip) | Preview: Bonjour'
     """
-    tags = stream.get("tags", {})
-    lang = tags.get("language", "unknown")
+    lang = stream.get("tags", {}).get("language", "unknown")
     codec = stream.get("codec_name", "unknown")
-    title = tags.get("title", "")
-    title_str = f" - {title}" if title else ""
     preview = get_subtitle_preview(video_path=video_path, stream_index=stream["index"])
     preview_str = f" | Preview: {preview}" if preview else ""
-    return f"{lang} ({codec}){title_str}{preview_str}"
+    return f'"{subtitle_stream_name(stream)}" ({lang}, {codec}){preview_str}'
 
 
 def get_subtitle_preview(video_path: str, stream_index: int) -> str:

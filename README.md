@@ -71,7 +71,15 @@ uv run srt_ai_translator.py \
   --output movie_en.srt
 ```
 
-If the video contains multiple subtitle streams and `--subtitle-stream` is not given, the tool lists them (language, codec, title and a text preview) and exits. Rerun with `--subtitle-stream N` to pick the N-th stream of that list (1-based), e.g. `--subtitle-stream 2`.
+If the video contains multiple subtitle streams and `--subtitle-stream` is not given, the tool lists them with their quoted name (the stream title, or its language when untitled), language, codec and a text preview, then exits:
+
+```
+  1. "fre" (fre, subrip)
+  2. "English" (eng, subrip)
+  3. "English SDH" (eng, subrip)
+```
+
+Rerun with `--subtitle-stream` set to either the 1-based number or the name. A name is matched exactly first, otherwise the unique name starting with it (case-insensitive) is used: `--subtitle-stream English` picks 2, `--subtitle-stream "english s"` picks 3, and `--subtitle-stream Eng` errors out because it is ambiguous (use the number then).
 
 ### With File Description and Custom Window Size
 
@@ -116,7 +124,7 @@ uv run srt_ai_translator.py \
 - `--api-key`: API key for the provider (if not provided, LiteLLM uses the provider's standard environment variable, e.g. `OPENROUTER_API_KEY`)
 - `--window-size`: Number of subtitle entries to process in each batch (default: 8)
 - `--file-description`: Description/context of the file to aid translation (e.g., video type, dialect, domain)
-- `--subtitle-stream`: For video input with several subtitle streams, the 1-based number of the stream to translate (default: the only stream, or list them and exit if there are several). Ignored for `.srt` input
+- `--subtitle-stream`: For video input with several subtitle streams, the stream to translate: its quoted name as listed (exact match, else unique case-insensitive prefix match) or its 1-based number (default: the only stream, or list them and exit if there are several). Ignored for `.srt` input
 - `--temperature`: Sampling temperature for the model (default: unset, so the provider/model default is used)
 - `--no-thinking`: Disable model reasoning/thinking (sends OpenRouter `reasoning {"enabled": false}`); useful with reasoning models like DeepSeek to translate faster and cheaper. Omit to leave the provider default.
 
