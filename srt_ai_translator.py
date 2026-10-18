@@ -37,19 +37,29 @@ VERSION: str = "1.0.0"
 _OK_FINISH_REASONS = {"stop", "end_turn", "completed", None}
 
 
+class _HelpOnErrorParser(argparse.ArgumentParser):
+    """ArgumentParser that prints the full help (with defaults) on a bad
+    argument instead of only the terse usage line."""
+
+    def error(self, message):
+        self.print_help(sys.stderr)
+        self.exit(2, f"\n{self.prog}: error: {message}\n")
+
+
 def main():
     # Configure logger to write to ./logs.txt with rotation and retention
     logger.add("./logs.txt", rotation="10 MB", retention="7 days", level="INFO")
 
-    parser = argparse.ArgumentParser(
+    parser = _HelpOnErrorParser(
         description="Translate SRT subtitle files using LiteLLM (OpenRouter by default)"
     )
 
     parser.add_argument(
         "--input",
         required=True,
+        metavar="SRT_OR_VIDEO",
         help="Path to the input file: either an SRT subtitle file (.srt) or a "
-        "video file to extract subtitles from (any other extension).",
+        "video file to extract subtitles from (any other extension, e.g. .mkv, .mp4).",
     )
     parser.add_argument(
         "--output",
@@ -58,7 +68,7 @@ def main():
     parser.add_argument(
         "--target-language",
         default="English",
-        help="Target language for translation (default: English)",
+        help="Target language for translation (default: %(default)s)",
     )
     parser.add_argument(
         "--file-description",
@@ -69,13 +79,14 @@ def main():
         "--window-size",
         type=int,
         default=4,
-        help="Number of subtitle entries to process in each batch (default: 4)",
+        help="Number of subtitle entries to process in each batch (default: %(default)s)",
     )
     parser.add_argument(
         "--temperature",
         type=float,
-        default=0.3,
-        help="Sampling temperature for the model (default: 0.3)",
+        default=None,
+        help="Sampling temperature for the model (default: unset, so the "
+        "provider/model default is used)",
     )
     parser.add_argument(
         "--no-thinking",
@@ -87,7 +98,7 @@ def main():
     parser.add_argument(
         "--model",
         default="openrouter/deepseek/deepseek-v4-pro",
-        help="LiteLLM model name to use for translation (default: openrouter/deepseek/deepseek-v4-pro)",
+        help="LiteLLM model name to use for translation (default: %(default)s)",
     )
     parser.add_argument(
         "--base-url",
@@ -394,7 +405,7 @@ def translate_window(
     system_prompt,
     api_key=None,
     api_base=None,
-    temperature=0.3,
+    temperature=None,
     no_thinking=False,
     max_retries=5,
     base_delay=1.0,
@@ -425,7 +436,8 @@ def translate_window(
     api_base : str, optional
         Optional API base URL override (LiteLLM api_base).
     temperature : float, optional
-        Sampling temperature passed to the model (default: 0.3).
+        Sampling temperature passed to the model. None (default) leaves it
+        unset so the provider/model default applies.
     no_thinking : bool, optional
         When True, disable model reasoning/thinking by sending OpenRouter's
         reasoning {"enabled": False} in extra_body. When False, the reasoning
@@ -465,10 +477,13 @@ def translate_window(
             completion_kwargs = dict(
                 model=model,
                 messages=messages,
-                temperature=temperature,
                 api_key=api_key,
                 api_base=api_base,
             )
+            # Only send temperature when explicitly set, so the provider/model
+            # default applies otherwise.
+            if temperature is not None:
+                completion_kwargs["temperature"] = temperature
             # Disabling reasoning ("thinking") is an OpenRouter request-body field
             # passed through extra_body. {"enabled": False} turns thinking off for
             # reasoning models like DeepSeek; omitting the field entirely leaves

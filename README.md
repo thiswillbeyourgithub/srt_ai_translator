@@ -116,7 +116,7 @@ uv run srt_ai_translator.py \
 - `--api-key`: API key for the provider (if not provided, LiteLLM uses the provider's standard environment variable, e.g. `OPENROUTER_API_KEY`)
 - `--window-size`: Number of subtitle entries to process in each batch (default: 4)
 - `--file-description`: Description/context of the file to aid translation (e.g., video type, dialect, domain)
-- `--temperature`: Sampling temperature for the model (default: 0.3)
+- `--temperature`: Sampling temperature for the model (default: unset, so the provider/model default is used)
 - `--no-thinking`: Disable model reasoning/thinking (sends OpenRouter `reasoning {"enabled": false}`); useful with reasoning models like DeepSeek to translate faster and cheaper. Omit to leave the provider default.
 
 ## How It Works
