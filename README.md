@@ -114,7 +114,7 @@ uv run srt_ai_translator.py \
 - `--model`: LiteLLM model name to use for translation (default: `openrouter/~deepseek/deepseek-pro-latest`)
 - `--base-url`: Optional API base URL override (LiteLLM `api_base`); only needed for custom/self-hosted endpoints
 - `--api-key`: API key for the provider (if not provided, LiteLLM uses the provider's standard environment variable, e.g. `OPENROUTER_API_KEY`)
-- `--window-size`: Number of subtitle entries to process in each batch (default: 4)
+- `--window-size`: Number of subtitle entries to process in each batch (default: 8)
 - `--file-description`: Description/context of the file to aid translation (e.g., video type, dialect, domain)
 - `--temperature`: Sampling temperature for the model (default: unset, so the provider/model default is used)
 - `--no-thinking`: Disable model reasoning/thinking (sends OpenRouter `reasoning {"enabled": false}`); useful with reasoning models like DeepSeek to translate faster and cheaper. Omit to leave the provider default.
@@ -210,7 +210,7 @@ uv run srt_ai_translator.py \
 
 For dialogue-heavy content (more context needed):
 ```bash
---window-size 8
+--window-size 12
 ```
 
 For simple content or to reduce API costs:

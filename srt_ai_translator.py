@@ -78,7 +78,7 @@ def main():
     parser.add_argument(
         "--window-size",
         type=int,
-        default=4,
+        default=8,
         help="Number of subtitle entries to process in each batch (default: %(default)s)",
     )
     parser.add_argument(
