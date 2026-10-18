@@ -71,7 +71,7 @@ uv run srt_ai_translator.py \
   --output movie_en.srt
 ```
 
-If the video contains multiple subtitle streams, you'll be prompted to select which one to translate. The tool provides helpful previews to identify each stream.
+If the video contains multiple subtitle streams and `--subtitle-stream` is not given, the tool lists them (language, codec, title and a text preview) and exits. Rerun with `--subtitle-stream N` to pick the N-th stream of that list (1-based), e.g. `--subtitle-stream 2`.
 
 ### With File Description and Custom Window Size
 
@@ -116,6 +116,7 @@ uv run srt_ai_translator.py \
 - `--api-key`: API key for the provider (if not provided, LiteLLM uses the provider's standard environment variable, e.g. `OPENROUTER_API_KEY`)
 - `--window-size`: Number of subtitle entries to process in each batch (default: 8)
 - `--file-description`: Description/context of the file to aid translation (e.g., video type, dialect, domain)
+- `--subtitle-stream`: For video input with several subtitle streams, the 1-based number of the stream to translate (default: the only stream, or list them and exit if there are several). Ignored for `.srt` input
 - `--temperature`: Sampling temperature for the model (default: unset, so the provider/model default is used)
 - `--no-thinking`: Disable model reasoning/thinking (sends OpenRouter `reasoning {"enabled": false}`); useful with reasoning models like DeepSeek to translate faster and cheaper. Omit to leave the provider default.
 

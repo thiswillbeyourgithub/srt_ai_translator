@@ -82,6 +82,14 @@ def main():
         help="Number of subtitle entries to process in each batch (default: %(default)s)",
     )
     parser.add_argument(
+        "--subtitle-stream",
+        type=int,
+        metavar="N",
+        help="When --input is a video with several subtitle streams, the "
+        "1-based number of the stream to translate (default: use the only "
+        "stream, or list them and exit if there are several). Ignored for .srt input.",
+    )
+    parser.add_argument(
         "--temperature",
         type=float,
         default=None,
@@ -146,45 +154,32 @@ def main():
             logger.error("No subtitle streams found in video")
             sys.exit(1)
 
-        # If multiple streams, prompt user for choice
-        selected_stream = None
-        if len(subtitle_streams) == 1:
-            selected_stream = subtitle_streams[0]
-            logger.info(
-                f"Found 1 subtitle stream: {selected_stream['language']} ({selected_stream['codec_name']})"
+        # Without --subtitle-stream, a single stream is used as is, while
+        # multiple streams are listed so the user can rerun with a choice.
+        if args.subtitle_stream is None and len(subtitle_streams) > 1:
+            logger.error(
+                f"Found {len(subtitle_streams)} subtitle streams, pick one "
+                "with --subtitle-stream N:"
             )
-        else:
-            logger.info(f"Found {len(subtitle_streams)} subtitle streams:")
-            for idx, stream in enumerate(subtitle_streams):
-                lang = stream.get("language", "unknown")
-                codec = stream.get("codec_name", "unknown")
-                title = stream.get("title", "")
-                title_str = f" - {title}" if title else ""
-
-                # Get preview text to help identify the stream
-                preview = get_subtitle_preview(
-                    video_path=args.input, stream_index=stream["index"]
+            for idx, stream in enumerate(subtitle_streams, start=1):
+                logger.error(
+                    f"  {idx}. "
+                    + describe_subtitle_stream(video_path=args.input, stream=stream)
                 )
-                preview_str = f" | Preview: {preview}" if preview else ""
+            sys.exit(1)
 
-                logger.info(f"  {idx + 1}. {lang} ({codec}){title_str}{preview_str}")
-
-            while True:
-                try:
-                    choice = input(
-                        "Enter the number of the subtitle stream to translate: "
-                    )
-                    choice_idx = int(choice) - 1
-                    if 0 <= choice_idx < len(subtitle_streams):
-                        selected_stream = subtitle_streams[choice_idx]
-                        break
-                    else:
-                        print(
-                            f"Invalid choice. Please enter a number between 1 and {len(subtitle_streams)}"
-                        )
-                except (ValueError, KeyboardInterrupt):
-                    logger.error("Invalid input or interrupted")
-                    sys.exit(1)
+        choice = args.subtitle_stream or 1
+        if not 1 <= choice <= len(subtitle_streams):
+            logger.error(
+                f"--subtitle-stream must be between 1 and {len(subtitle_streams)}, "
+                f"got: {choice}"
+            )
+            sys.exit(1)
+        selected_stream = subtitle_streams[choice - 1]
+        logger.info(
+            f"Using subtitle stream {choice}/{len(subtitle_streams)}: "
+            + describe_subtitle_stream(video_path=args.input, stream=selected_stream)
+        )
 
         # Extract subtitle to temporary SRT file
         # Using NamedTemporaryFile with delete=False to keep the file for processing
@@ -208,7 +203,7 @@ def main():
             # Uses video filename, stream language, and target language for clarity
             if not args.output:
                 video_stem = Path(args.input).stem
-                stream_lang = selected_stream.get("language", "unknown")
+                stream_lang = selected_stream.get("tags", {}).get("language", "unknown")
                 args.output = f"{video_stem}_{stream_lang}_{args.target_language}.srt"
                 logger.info(f"Auto-generated output path: {args.output}")
         except Exception as e:
@@ -602,6 +597,33 @@ def list_subtitle_streams(video_path: str) -> list:
     except Exception as e:
         logger.error(f"Error probing video file: {e}")
         raise
+
+
+def describe_subtitle_stream(video_path: str, stream: dict) -> str:
+    """Human readable one-line description of a subtitle stream
+
+    ffprobe stores language and title under the stream's "tags".
+
+    Parameters
+    ----------
+    video_path : str
+        Path to the video file, used to extract a text preview
+    stream : dict
+        Stream information dictionary from list_subtitle_streams
+
+    Returns
+    -------
+    str
+        e.g. "fre (subrip) - Forced | Preview: Bonjour"
+    """
+    tags = stream.get("tags", {})
+    lang = tags.get("language", "unknown")
+    codec = stream.get("codec_name", "unknown")
+    title = tags.get("title", "")
+    title_str = f" - {title}" if title else ""
+    preview = get_subtitle_preview(video_path=video_path, stream_index=stream["index"])
+    preview_str = f" | Preview: {preview}" if preview else ""
+    return f"{lang} ({codec}){title_str}{preview_str}"
 
 
 def get_subtitle_preview(video_path: str, stream_index: int) -> str:
