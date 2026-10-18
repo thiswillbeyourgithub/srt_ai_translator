@@ -36,6 +36,10 @@ VERSION: str = "1.2.0"
 # None is accepted because some providers omit finish_reason on a normal reply.
 _OK_FINISH_REASONS = {"stop", "end_turn", "completed", None}
 
+# --thinking values: "none" disables reasoning, "default" omits the field so
+# OpenRouter/the model decides, the rest are OpenRouter reasoning effort levels.
+REASONING_LEVELS = ["none", "minimal", "low", "medium", "high", "xhigh", "default"]
+
 
 class _HelpOnErrorParser(argparse.ArgumentParser):
     """ArgumentParser that prints the full help (with defaults) on a bad
@@ -98,11 +102,17 @@ def main():
         "provider/model default is used)",
     )
     parser.add_argument(
-        "--no-thinking",
-        action="store_true",
-        help="Disable model reasoning/thinking (sends OpenRouter reasoning "
-        "{'enabled': False}). Useful with reasoning models like DeepSeek to make "
-        "translation faster and cheaper. Omit to leave the provider default.",
+        "--thinking",
+        "--reasoning",
+        dest="reasoning",
+        choices=REASONING_LEVELS,
+        default="none",
+        metavar="LEVEL",
+        help="Model reasoning/thinking level, one of %(choices)s, sent as "
+        "OpenRouter reasoning (only for openrouter/ models). "
+        "'none' disables it ({'enabled': False}), a level sends "
+        "{'effort': LEVEL}, 'default' omits the field so OpenRouter/the model "
+        "picks (default: %(default)s)",
     )
     parser.add_argument(
         "--provider",
@@ -311,7 +321,7 @@ def main():
             api_key=args.api_key,
             api_base=args.base_url,
             temperature=args.temperature,
-            no_thinking=args.no_thinking,
+            reasoning=args.reasoning,
         )
         translated_subs.extend(translated_window)
 
@@ -456,7 +466,7 @@ def translate_window(
     api_key=None,
     api_base=None,
     temperature=None,
-    no_thinking=False,
+    reasoning="none",
     max_retries=5,
     base_delay=1.0,
 ):
@@ -496,10 +506,11 @@ def translate_window(
     temperature : float, optional
         Sampling temperature passed to the model. None (default) leaves it
         unset so the provider/model default applies.
-    no_thinking : bool, optional
-        When True, disable model reasoning/thinking by sending OpenRouter's
-        reasoning {"enabled": False} in extra_body. When False, the reasoning
-        field is omitted so the provider default applies (default: False).
+    reasoning : str, optional
+        One of REASONING_LEVELS. "none" (default) disables reasoning, "default"
+        omits the field so the provider default applies, any other value is
+        sent as the OpenRouter reasoning effort. Ignored for non openrouter/
+        models.
     max_retries : int, optional
         Maximum number of attempts before falling back to the untranslated
         window (default: 5).
@@ -524,17 +535,23 @@ def translate_window(
         ]
     messages.append({"role": "user", "content": window_to_user_message(window)})
 
-    # OpenRouter-specific request-body fields, passed through extra_body.
+    # OpenRouter-specific request-body fields, passed through extra_body. Other
+    # providers could reject them, so they are only sent to openrouter/ models.
     extra_body = {}
-    # Disabling reasoning ("thinking"): {"enabled": False} turns thinking off
-    # for reasoning models like DeepSeek; omitting the field entirely leaves
-    # the provider default (thinking on). Confirmed against OpenRouter.
-    if no_thinking:
+    is_openrouter = model.startswith("openrouter/")
+    # Reasoning ("thinking"): {"enabled": False} turns it off for reasoning
+    # models like DeepSeek (confirmed against OpenRouter), {"effort": "high"}
+    # sets a level, and omitting the field leaves the provider default.
+    if not is_openrouter or reasoning == "default":
+        pass
+    elif reasoning == "none":
         extra_body["reasoning"] = {"enabled": False}
+    else:
+        extra_body["reasoning"] = {"effort": reasoning}
     # Provider pinning, e.g. "deepseek" -> {"order": ["deepseek"],
     # "allow_fallbacks": False}, so OpenRouter never silently routes to another
     # (possibly quantized or slower) host of the same model.
-    if provider and model.startswith("openrouter/"):
+    if provider and is_openrouter:
         extra_body["provider"] = {
             "order": [p.strip() for p in provider.split(",") if p.strip()],
             "allow_fallbacks": False,

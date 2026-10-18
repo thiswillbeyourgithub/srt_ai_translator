@@ -12,7 +12,7 @@ Translate SRT subtitle files using any [LiteLLM](https://github.com/BerriAI/lite
 - **Robust Error Handling**: Automatic retry with exponential backoff on transient provider errors, unclean completions (truncated/censored `finish_reason`), and malformed replies, with feedback to the model
 - **Chunk-Count Validation**: Only accepts a reply that returns exactly one translated entry per input subtitle
 - **Provider Pinning**: On OpenRouter, requests are pinned to DeepSeek's own endpoint by default with no fallback (`--provider`)
-- **Reasoning Control**: `--no-thinking` disables model reasoning (e.g. for DeepSeek) for faster, cheaper runs
+- **Reasoning Control**: Model reasoning is off by default for faster, cheaper runs; `--thinking`/`--reasoning` sets an effort level or leaves it to the provider
 - **Prompt Cache Friendly**: Reuses an identical system prompt across every window to maximize provider-side prompt/KV caching
 - **Progress Tracking**: Real-time progress bar using tqdm
 - **Incremental Saves**: Saves progress after each window to allow recovery on failure
@@ -53,13 +53,13 @@ uv run srt_ai_translator.py \
 
 The output path is auto-generated (here `input_English.srt`) unless you pass `--output`.
 
-For a faster, cheaper run with a reasoning model, disable thinking:
+Reasoning (thinking) is disabled by default for a faster, cheaper run. To let the model think, set an effort level, or `default` to let OpenRouter/the model decide:
 
 ```bash
 uv run srt_ai_translator.py \
   --input input.srt \
   --target-language English \
-  --no-thinking
+  --thinking high
 ```
 
 ### Extract and Translate from Video
@@ -130,7 +130,7 @@ uv run srt_ai_translator.py \
 - `--context-windows`: Number of previous windows (original and translation) sent as context with each window; 0 disables it (default: 1)
 - `--provider`: OpenRouter provider(s) to pin requests to, comma-separated in order of preference, with fallbacks to other providers disabled (sends `provider {"order": [...], "allow_fallbacks": false}`). Pass `--provider ""` to let OpenRouter route freely. Only applies to `openrouter/` models (default: `deepseek`)
 - `--temperature`: Sampling temperature for the model (default: unset, so the provider/model default is used)
-- `--no-thinking`: Disable model reasoning/thinking (sends OpenRouter `reasoning {"enabled": false}`); useful with reasoning models like DeepSeek to translate faster and cheaper. Omit to leave the provider default.
+- `--thinking` / `--reasoning`: Model reasoning level, one of `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `default` (default: `none`). `none` sends OpenRouter `reasoning {"enabled": false}`, a level sends `reasoning {"effort": LEVEL}`, and `default` omits the field so OpenRouter/the model picks. Only applies to `openrouter/` models.
 
 ## How It Works
 
