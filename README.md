@@ -7,9 +7,11 @@ Translate SRT subtitle files using any [LiteLLM](https://github.com/BerriAI/lite
 - **Video Subtitle Extraction**: Extract subtitles directly from video files (pick a stream with `--subtitle-stream`)
 - **Windowed Translation**: Processes subtitles in configurable batches to maintain context and optimize API usage
 - **100+ Providers via LiteLLM**: Works with OpenRouter (default), OpenAI, Anthropic, local LLMs and any other LiteLLM-supported backend, selected purely by the model name
+- **Previous-Window Context**: Each window is sent after the previous window(s) as past exchanges (original and translation), for continuity of split sentences, names and terminology (`--context-windows`)
 - **Context-Aware**: Supports a custom file description for better translations (video type, dialect, domain-specific terminology)
 - **Robust Error Handling**: Automatic retry with exponential backoff on transient provider errors, unclean completions (truncated/censored `finish_reason`), and malformed replies, with feedback to the model
 - **Chunk-Count Validation**: Only accepts a reply that returns exactly one translated entry per input subtitle
+- **Provider Pinning**: On OpenRouter, requests are pinned to DeepSeek's own endpoint by default with no fallback (`--provider`)
 - **Reasoning Control**: `--no-thinking` disables model reasoning (e.g. for DeepSeek) for faster, cheaper runs
 - **Prompt Cache Friendly**: Reuses an identical system prompt across every window to maximize provider-side prompt/KV caching
 - **Progress Tracking**: Real-time progress bar using tqdm
@@ -125,6 +127,8 @@ uv run srt_ai_translator.py \
 - `--window-size`: Number of subtitle entries to process in each batch (default: 8)
 - `--file-description`: Description/context of the file to aid translation (e.g., video type, dialect, domain)
 - `--subtitle-stream`: For video input with several subtitle streams, the stream to translate: its quoted name as listed (exact match, else unique case-insensitive prefix match) or its 1-based number (default: the only stream, or list them and exit if there are several). Ignored for `.srt` input
+- `--context-windows`: Number of previous windows (original and translation) sent as context with each window; 0 disables it (default: 1)
+- `--provider`: OpenRouter provider(s) to pin requests to, comma-separated in order of preference, with fallbacks to other providers disabled (sends `provider {"order": [...], "allow_fallbacks": false}`). Pass `--provider ""` to let OpenRouter route freely. Only applies to `openrouter/` models (default: `deepseek`)
 - `--temperature`: Sampling temperature for the model (default: unset, so the provider/model default is used)
 - `--no-thinking`: Disable model reasoning/thinking (sends OpenRouter `reasoning {"enabled": false}`); useful with reasoning models like DeepSeek to translate faster and cheaper. Omit to leave the provider default.
 
@@ -137,7 +141,7 @@ uv run srt_ai_translator.py \
    - Extracts the selected stream to a temporary SRT file for processing
    - Automatically cleans up temporary files after completion
 
-2. **Windowed Processing**: The script divides the SRT file into windows of N entries (default 4). This balances between:
+2. **Windowed Processing**: The script divides the SRT file into windows of N entries (default 8). This balances between:
    - Providing enough context for the model to understand dialogue flow
    - Keeping prompts manageable and cost-effective
    - Allowing progress to be saved incrementally
@@ -149,6 +153,8 @@ uv run srt_ai_translator.py \
    <text id="2" start="00:00:04,000" end="00:00:06,200">Next subtitle</text>
    ```
    Reusing an identical system prompt across every window maximizes provider-side prompt/KV caching.
+
+   With `--context-windows 1` (the default), the previous window is inserted before the current one as a past user/assistant exchange: its original XML as the user turn, and its translation as the assistant turn. The assistant turn is rebuilt from the parsed translations (`<answer><text id="1">...</text>...</answer>`) rather than copied from the raw reply, so it never contains the model's thinking or anything outside the `<answer>` block. A window whose translation failed is not used as context.
 
 4. **Timing Context**: The start/end times help the model understand temporal relationships:
    - Rapid dialogue suggests conversation

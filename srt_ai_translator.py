@@ -105,6 +105,23 @@ def main():
         "translation faster and cheaper. Omit to leave the provider default.",
     )
     parser.add_argument(
+        "--provider",
+        default="deepseek",
+        help="OpenRouter provider(s) to pin requests to, comma-separated in "
+        "order of preference, with fallbacks to other providers disabled. Pass "
+        "an empty string to let OpenRouter route freely. Only applies to "
+        "openrouter/ models (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--context-windows",
+        type=int,
+        default=1,
+        metavar="N",
+        help="Number of previous windows (original and translation) sent as "
+        "context with each window, for continuity of dialogue and terminology. "
+        "0 disables it (default: %(default)s)",
+    )
+    parser.add_argument(
         "--model",
         default="openrouter/~deepseek/deepseek-pro-latest",
         help="LiteLLM model name to use for translation (default: %(default)s)",
@@ -280,18 +297,28 @@ def main():
         target_language=args.target_language, file_description=args.file_description
     )
 
+    # Last --context-windows (original, translated) window pairs, oldest first.
+    context = []
+
     # Process each window with progress bar
     for window_idx, window in enumerate(tqdm(iterable=windows, desc="Translating")):
         translated_window = translate_window(
             window=window,
             model=args.model,
             system_prompt=system_prompt,
+            context=context,
+            provider=args.provider,
             api_key=args.api_key,
             api_base=args.base_url,
             temperature=args.temperature,
             no_thinking=args.no_thinking,
         )
         translated_subs.extend(translated_window)
+
+        # A failed window comes back as the untranslated original, which would
+        # be a misleading example of a translation, so it is not kept.
+        if args.context_windows > 0 and translated_window is not window:
+            context = (context + [(window, translated_window)])[-args.context_windows :]
 
         # Write current progress to the temporary file after each window for
         # continuous incremental updates and recovery on failure. The write is
@@ -395,10 +422,37 @@ Reply with EXACTLY one <text> element per input subtitle, reusing the same ids, 
 </answer>"""
 
 
+def window_to_user_message(window) -> str:
+    """User message asking to translate a window, e.g.
+    'Translate these subtitles:\n<text id="1" start="00:00:01,000" end="00:00:02,000">Bonjour</text>'
+    """
+    xml_texts = [
+        f'<text id="{i}" start="{sub.start}" end="{sub.end}">{sub.text}</text>'
+        for i, sub in enumerate(window, start=1)
+    ]
+    return "Translate these subtitles:\n" + "\n".join(xml_texts)
+
+
+def window_to_answer(translated_window) -> str:
+    """Rebuild a clean assistant answer from translated entries, e.g.
+    '<answer>\n<text id="1">Hello</text>\n</answer>'
+
+    Used for context turns instead of the raw reply so they never carry the
+    model's thinking or any text outside the <answer> block.
+    """
+    xml_texts = [
+        f'<text id="{i}">{sub.text}</text>'
+        for i, sub in enumerate(translated_window, start=1)
+    ]
+    return "<answer>\n" + "\n".join(xml_texts) + "\n</answer>"
+
+
 def translate_window(
     window,
     model,
     system_prompt,
+    context=(),
+    provider="",
     api_key=None,
     api_base=None,
     temperature=None,
@@ -413,8 +467,9 @@ def translate_window(
     finish_reason, e.g. truncation), and malformed replies (including replies that
     do not contain exactly one translated chunk per input subtitle, which is
     enforced by parse_xml_response). On a malformed reply the model's bad answer
-    plus a correction are appended as extra turns, while the [system, user] prefix
-    is kept byte-identical so it stays cacheable across retries and across windows.
+    plus a correction are appended as extra turns, while the initial messages are kept
+    byte-identical so they stay cacheable across retries (and the system prompt
+    across windows).
     Authentication errors are never retried (they cannot succeed on retry).
 
     Parameters
@@ -426,6 +481,13 @@ def translate_window(
     system_prompt : str
         Run-constant system prompt (see build_system_prompt); identical across
         windows to maximize provider-side prompt/KV caching.
+    context : sequence of (list, list), optional
+        Previous (original window, translated window) pairs, oldest first, sent
+        as past user/assistant turns before this window (default: none).
+    provider : str, optional
+        Comma-separated OpenRouter provider slugs to pin the request to, with
+        fallbacks disabled. Empty (default) or a non openrouter/ model leaves
+        routing to the provider.
     api_key : str, optional
         API key for the provider. If None, LiteLLM uses the provider's standard
         environment variable.
@@ -451,21 +513,32 @@ def translate_window(
         Translated SubRipItem entries, or the original (untranslated) window as a
         fallback if every attempt fails.
     """
-    # Build the variable, per-window user message: only the subtitle texts (with
-    # timing) go here. Keeping this separate from the constant system prompt is
-    # what makes the cacheable prefix identical across windows.
-    xml_texts = [
-        f'<text id="{i}" start="{sub.start}" end="{sub.end}">{sub.text}</text>'
-        for i, sub in enumerate(window, start=1)
-    ]
-    user_content = "Translate these subtitles:\n" + "\n".join(xml_texts)
+    # The system prompt is first and identical across windows so it stays
+    # cacheable. Then come the context windows as past exchanges, then this
+    # window. Correction turns are only ever appended after this prefix.
+    messages = [{"role": "system", "content": system_prompt}]
+    for past_window, past_translation in context:
+        messages += [
+            {"role": "user", "content": window_to_user_message(past_window)},
+            {"role": "assistant", "content": window_to_answer(past_translation)},
+        ]
+    messages.append({"role": "user", "content": window_to_user_message(window)})
 
-    # The [system, user] prefix stays constant; correction turns are only ever
-    # appended after it, preserving the cacheable prefix.
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_content},
-    ]
+    # OpenRouter-specific request-body fields, passed through extra_body.
+    extra_body = {}
+    # Disabling reasoning ("thinking"): {"enabled": False} turns thinking off
+    # for reasoning models like DeepSeek; omitting the field entirely leaves
+    # the provider default (thinking on). Confirmed against OpenRouter.
+    if no_thinking:
+        extra_body["reasoning"] = {"enabled": False}
+    # Provider pinning, e.g. "deepseek" -> {"order": ["deepseek"],
+    # "allow_fallbacks": False}, so OpenRouter never silently routes to another
+    # (possibly quantized or slower) host of the same model.
+    if provider and model.startswith("openrouter/"):
+        extra_body["provider"] = {
+            "order": [p.strip() for p in provider.split(",") if p.strip()],
+            "allow_fallbacks": False,
+        }
 
     for attempt in range(max_retries):
         # --- Call the provider (transient errors are retried with backoff) ---
@@ -480,12 +553,8 @@ def translate_window(
             # default applies otherwise.
             if temperature is not None:
                 completion_kwargs["temperature"] = temperature
-            # Disabling reasoning ("thinking") is an OpenRouter request-body field
-            # passed through extra_body. {"enabled": False} turns thinking off for
-            # reasoning models like DeepSeek; omitting the field entirely leaves
-            # the provider default (thinking on). Confirmed against OpenRouter.
-            if no_thinking:
-                completion_kwargs["extra_body"] = {"reasoning": {"enabled": False}}
+            if extra_body:
+                completion_kwargs["extra_body"] = extra_body
 
             response = litellm.completion(**completion_kwargs)
             choice = response.choices[0]
@@ -539,7 +608,7 @@ def translate_window(
                     f"Retrying in {delay:.1f}s. Raw reply (truncated): {snippet!r}"
                 )
                 # Append the bad answer and a correction as new turns; the
-                # [system, user] prefix above is left untouched for caching.
+                # initial messages above are left untouched for caching.
                 messages = messages + [
                     {"role": "assistant", "content": response_text},
                     {
