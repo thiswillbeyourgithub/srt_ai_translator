@@ -4,7 +4,7 @@ Translate SRT subtitle files using any [LiteLLM](https://github.com/BerriAI/lite
 
 ## Features
 
-- **Video Subtitle Extraction**: Extract subtitles directly from video files with interactive stream selection
+- **Video Subtitle Extraction**: Extract subtitles directly from video files (pick a stream with `--subtitle-stream`)
 - **Windowed Translation**: Processes subtitles in configurable batches to maintain context and optimize API usage
 - **100+ Providers via LiteLLM**: Works with OpenRouter (default), OpenAI, Anthropic, local LLMs and any other LiteLLM-supported backend, selected purely by the model name
 - **Context-Aware**: Supports a custom file description for better translations (video type, dialect, domain-specific terminology)
@@ -125,7 +125,7 @@ uv run srt_ai_translator.py \
 1. **Video Subtitle Extraction** (when `--input` is not a `.srt` file):
    - Uses ffmpeg to probe the video file for subtitle streams
    - Lists all available subtitle streams with language, codec, and preview text
-   - Allows interactive selection when multiple streams are present
+   - Lists the streams and exits when several are present, unless `--subtitle-stream` picks one
    - Extracts the selected stream to a temporary SRT file for processing
    - Automatically cleans up temporary files after completion
 
