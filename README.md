@@ -40,7 +40,7 @@ pip install pysrt litellm tqdm loguru ffmpeg-python
 
 ### Basic Example (SRT File)
 
-The default model is `openrouter/deepseek/deepseek-v4-pro`, so with `OPENROUTER_API_KEY` set you only need the input:
+The default model is `openrouter/~deepseek/deepseek-pro-latest`, so with `OPENROUTER_API_KEY` set you only need the input:
 
 ```bash
 export OPENROUTER_API_KEY="sk-or-..."
@@ -111,7 +111,7 @@ uv run srt_ai_translator.py \
 
 - `--target-language`: Target language for translation (default: `English`)
 - `--output`: Path for the output translated SRT file (if not provided, auto-generated based on input filename and target language)
-- `--model`: LiteLLM model name to use for translation (default: `openrouter/deepseek/deepseek-v4-pro`)
+- `--model`: LiteLLM model name to use for translation (default: `openrouter/~deepseek/deepseek-pro-latest`)
 - `--base-url`: Optional API base URL override (LiteLLM `api_base`); only needed for custom/self-hosted endpoints
 - `--api-key`: API key for the provider (if not provided, LiteLLM uses the provider's standard environment variable, e.g. `OPENROUTER_API_KEY`)
 - `--window-size`: Number of subtitle entries to process in each batch (default: 4)

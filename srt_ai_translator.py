@@ -97,7 +97,7 @@ def main():
     )
     parser.add_argument(
         "--model",
-        default="openrouter/deepseek/deepseek-v4-pro",
+        default="openrouter/~deepseek/deepseek-pro-latest",
         help="LiteLLM model name to use for translation (default: %(default)s)",
     )
     parser.add_argument(
