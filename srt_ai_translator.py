@@ -27,7 +27,7 @@ from loguru import logger
 import ffmpeg
 import tempfile
 
-VERSION: str = "1.1.0"
+VERSION: str = "1.2.0"
 
 # Accepted finish_reason values from the completion API. Anything else means the
 # provider did not cleanly finish the reply: "length" = truncated at the max
